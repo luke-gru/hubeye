@@ -1,11 +1,49 @@
 #!/usr/bin/env ruby
 require 'socket'
+require 'open-uri'
+require 'nokogiri'
+
 server = TCPServer.open(2000)       # Listen on port 2000
 sockets = [server]            # An array of sockets we'll monitor
 log = STDOUT              # Send log messages to standard out
 ary_commits_repos = []
+hubeye_tracker = []
+timeout = 10
 while true                # Servers loop forever
-  ready = select(sockets)         # Wait for a socket to be ready
+
+  #if no client is connected, but the commits array contains repos
+  if sockets.size == 1 && !ary_commits_repos.empty?
+    ary_commits_repos.each do |e|
+      #put these repos in the array hubeye_tracker
+      hubeye_tracker << e if ary_commits_repos.index(e).even?
+      hubeye_tracker.uniq!
+    end
+
+    hubeye_tracker.each do |repo|
+      doc = Nokogiri::HTML(open("https://github.com/#{repo}/"))
+      doc.xpath('//div[@class = "message"]/pre').each do |node|
+        @commit_compare = node.text
+        if ary_commits_repos.include?(@commit_compare)
+          puts repo + "hasn't changed"
+          sleep timeout/hubeye_tracker.count
+        else
+          puts repo + " has changed"
+          print "new commit msg: #{@commit_compare}"
+          doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
+            @committer = node.text
+          end
+          print " => #{@committer}\n"
+        end
+      end
+    end
+    ready = select(sockets, nil, nil, 5)
+    redo unless ready
+  end
+
+  ready = select(sockets)
+  p sockets
+
+
   readable = ready[0]           # These sockets are readable
   readable.each do |socket|         # Loop through readable sockets
     if socket == server         # If the server socket is ready
@@ -47,20 +85,21 @@ while true                # Servers loop forever
         exit
       else # Otherwise, client is not quitting
 
-        require 'open-uri'
-        require 'nokogiri'
 
+        username = "luke-gru"
 
         if input == '' or input == '.'
           repo_name = File.expand_path(".").split("/").last
+        elsif input.include?("/")
+          username, repo_name = input.split("/")
         else
           repo_name = input
         end
 
         begin
-          doc = Nokogiri::HTML(open("https://github.com/luke-gru/#{repo_name}"))
+          doc = Nokogiri::HTML(open("https://github.com/#{username}/#{repo_name}"))
         rescue OpenURI::HTTPError
-          socket.puts("Not a git repository!")
+          socket.puts("Not a Github repository!")
           next
         rescue URI::InvalidURIError
           socket.puts("Bad URI")
@@ -76,8 +115,8 @@ while true                # Servers loop forever
           @committer = node.text
         end
 
-        if !ary_commits_repos.include?(input.downcase)
-          ary_commits_repos << input
+        if !ary_commits_repos.include?("#{username}/#{repo_name}".downcase.strip)
+          ary_commits_repos << "#{username}/#{repo_name}"
           ary_commits_repos << @commit_msg
 
           doc.xpath('//div[@class = "machine"]').each do |node|
@@ -92,12 +131,12 @@ while true                # Servers loop forever
           ary_commits_repos.delete_at(index_of_msg)
           ary_commits_repos.insert(index_of_msg - 1, @commit_msg)
           socket.puts("===============================")
-          socket.puts("Repository: #{input.downcase} has changed")
+          socket.puts("Repository: #{repo_name.downcase.strip} has changed")
           socket.puts("Commit msg: #{@commit_msg}") 
           socket.puts(" Committer: #{@committer}")
           socket.puts("===============================")
         else
-          socket.puts("Repository #{input.downcase} has not changed")
+          socket.puts("Repository #{repo_name.downcase.strip} has not changed")
         end
 
       end
