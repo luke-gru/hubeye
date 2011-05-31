@@ -8,8 +8,9 @@ sockets = [server]            # An array of sockets we'll monitor
 log = STDOUT              # Send log messages to standard out
 ary_commits_repos = []
 hubeye_tracker = []
-timeout = 10
-while true                # Servers loop forever
+oncearound = 10
+username = "luke-gru"
+while true
 
   #if no client is connected, but the commits array contains repos
   if sockets.size == 1 && !ary_commits_repos.empty?
@@ -24,8 +25,8 @@ while true                # Servers loop forever
       doc.xpath('//div[@class = "message"]/pre').each do |node|
         @commit_compare = node.text
         if ary_commits_repos.include?(@commit_compare)
-          puts repo + "hasn't changed"
-          sleep timeout/hubeye_tracker.count
+          puts repo + " hasn't changed"
+          sleep oncearound/hubeye_tracker.count
         else
           puts repo + " has changed"
           print "new commit msg: #{@commit_compare}"
@@ -33,6 +34,13 @@ while true                # Servers loop forever
             @committer = node.text
           end
           print " => #{@committer}\n"
+          ary_commits_repos << repo
+          ary_commits_repos << @commit_compare
+          #delete the repo and old commit that appear first in the array
+          index_old_HEAD = ary_commits_repos.index(repo)
+          ary_commits_repos.delete_at(index_old_HEAD)
+          #and again to get rid of the commit message
+          ary_commits_repos.delete_at(index_old_HEAD)
         end
       end
     end
@@ -71,6 +79,15 @@ while true                # Servers loop forever
       if (input.strip.downcase == "quit")      # If the client asks to quit
         socket.puts("Bye!");    # Say goodbye
         log.puts "Closing connection to #{socket.peeraddr[2]}"
+        if !ary_commits_repos.empty?
+          print "Tracking: "
+          ary_commits_repos.each do |repo|
+            print repo + " " if ary_commits_repos.index(repo).even?
+            hubeye_tracker.uniq!
+          end
+          log.puts
+        end
+
         log.puts #to look pretty when multiple connections per loop
         sockets.delete(socket)  # Stop monitoring the socket
         socket.close      # Terminate the session
@@ -86,12 +103,14 @@ while true                # Servers loop forever
       else # Otherwise, client is not quitting
 
 
-        username = "luke-gru"
 
-        if input == '' or input == '.'
+        if input == '.'
           repo_name = File.expand_path(".").split("/").last
         elsif input.include?("/")
           username, repo_name = input.split("/")
+        elsif input.strip == ''
+          socket.puts("")
+          next
         else
           repo_name = input
         end
@@ -102,7 +121,7 @@ while true                # Servers loop forever
           socket.puts("Not a Github repository!")
           next
         rescue URI::InvalidURIError
-          socket.puts("Bad URI")
+          socket.puts("Not a valid URI")
           next
         end
 
