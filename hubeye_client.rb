@@ -8,7 +8,8 @@ begin
   STDOUT.print "Connecting..."      # Say what we're doing
   STDOUT.flush            # Make it visible right away
   s = TCPSocket.open(host, port)    # Connect
-  STDOUT.puts "done"          # And say we did it
+  STDOUT.puts "Done" if s
+
   # Now display information about the connection.
   local, peer = s.addr, s.peeraddr
 

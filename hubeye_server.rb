@@ -59,7 +59,7 @@ while true
   p sockets
 
   def client_connected(sockets)
-    select(sockets, nil, nil, 5)
+    select(sockets, nil, nil, 2)
   end
 
   readable = ready[0]           # These sockets are readable
@@ -69,6 +69,7 @@ while true
       sockets << client       # Add it to the set of sockets
       # Tell the client what and where it has connected.
       client.puts "Hubeye running on #{Socket.gethostname}"
+      client.flush
       # And log the fact that the client connected
       log.puts "Accepted connection from #{client.peeraddr[2]}"
       log.puts "local:  #{client.addr}"
@@ -89,6 +90,7 @@ while true
       if (input.strip.downcase == "quit")      # If the client asks to quit
         socket.puts("Bye!");    # Say goodbye
         log.puts "Closing connection to #{socket.peeraddr[2]}"
+        @remote_connection = false
         if !ary_commits_repos.empty?
           print "Tracking: "
           ary_commits_repos.each do |repo|
