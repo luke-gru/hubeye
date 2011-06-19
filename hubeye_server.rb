@@ -10,47 +10,57 @@ ary_commits_repos = []
 hubeye_tracker = []
 oncearound = 10
 username = "luke-gru"
+@remote_connection = false
+
 while true
 
   #if no client is connected, but the commits array contains repos
-  if sockets.size == 1 && !ary_commits_repos.empty?
+  if sockets.size == 1 and ary_commits_repos.empty? == false
     ary_commits_repos.each do |e|
       #put these repos in the array hubeye_tracker
       hubeye_tracker << e if ary_commits_repos.index(e).even?
       hubeye_tracker.uniq!
     end
 
-    hubeye_tracker.each do |repo|
-      doc = Nokogiri::HTML(open("https://github.com/#{repo}/"))
-      doc.xpath('//div[@class = "message"]/pre').each do |node|
-        @commit_compare = node.text
-        if ary_commits_repos.include?(@commit_compare)
-          puts repo + " hasn't changed"
-          sleep oncearound/hubeye_tracker.count
-        else
-          puts repo + " has changed"
-          print "new commit msg: #{@commit_compare}"
-          doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
-            @committer = node.text
+    while @remote_connection == false
+      hubeye_tracker.each do |repo|
+        doc = Nokogiri::HTML(open("https://github.com/#{repo}/"))
+        doc.xpath('//div[@class = "message"]/pre').each do |node|
+          @commit_compare = node.text
+          if ary_commits_repos.include?(@commit_compare)
+            puts repo + " hasn't changed"
+            oncearound.times do
+              sleep 1
+              @remote_connection = client_connected(sockets) ? true : false
+              break if @remote_connection
+            end
+          else
+            puts repo + " has changed"
+            print "new commit msg: #{@commit_compare}"
+            doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
+              @committer = node.text
+            end
+            print " => #{@committer}\n"
+            ary_commits_repos << repo
+            ary_commits_repos << @commit_compare
+            #delete the repo and old commit that appear first in the array
+            index_old_HEAD = ary_commits_repos.index(repo)
+            ary_commits_repos.delete_at(index_old_HEAD)
+            #and again to get rid of the commit message
+            ary_commits_repos.delete_at(index_old_HEAD)
           end
-          print " => #{@committer}\n"
-          ary_commits_repos << repo
-          ary_commits_repos << @commit_compare
-          #delete the repo and old commit that appear first in the array
-          index_old_HEAD = ary_commits_repos.index(repo)
-          ary_commits_repos.delete_at(index_old_HEAD)
-          #and again to get rid of the commit message
-          ary_commits_repos.delete_at(index_old_HEAD)
         end
       end
+      redo unless @remote_connection
     end
-    ready = select(sockets, nil, nil, 5)
-    redo unless ready
   end
 
   ready = select(sockets)
   p sockets
 
+  def client_connected(sockets)
+    select(sockets, nil, nil, 5)
+  end
 
   readable = ready[0]           # These sockets are readable
   readable.each do |socket|         # Loop through readable sockets
@@ -87,7 +97,6 @@ while true
           end
           log.puts
         end
-
         log.puts #to look pretty when multiple connections per loop
         sockets.delete(socket)  # Stop monitoring the socket
         socket.close      # Terminate the session

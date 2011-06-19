@@ -35,7 +35,7 @@ begin
       # The server may send more than one line, so use readpartial
       # to read whatever it sends (as long as it all arrives in one chunk).
       sleep(0.5)
-      response = s.readpartial(4096)    # Read server's response
+      response = s.readpartial(4096)
       if response.chop.strip == "Bye!"
         puts(response.chop)
         s.close
