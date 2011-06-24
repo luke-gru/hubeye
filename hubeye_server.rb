@@ -13,7 +13,7 @@ begin
 require 'autotest'
 rescue LoadError
   require 'rubygems'
-  gem 'autotest'
+  gem 'autotest-notification'
   require 'autotest'
 end
 
