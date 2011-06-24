@@ -18,7 +18,7 @@ begin
   # Wait just a bit, to see if the server sends any initial message.
   begin
     sleep(0.5)            # Wait half a second
-    msg = s.read_nonblock(4096)     # Read whatever is ready
+    msg = s.readpartial(4096)     # Read whatever is ready
     STDOUT.puts msg.chop      # And display it
   rescue SystemCallError
     # If nothing was ready to read, just ignore the exception.
@@ -30,7 +30,7 @@ begin
       STDOUT.flush          # Make sure the prompt is visible
       local = STDIN.gets        # Read line from the console
       #break if !local             # Quit if no input from console
-      s.puts(local)             # Send the line to the server
+      s.puts(local.gsub(/\//, 'diiv'))    # Send the line to the server, daemons gem strips some special chars (/, :)
       s.flush               # Force it out
       # Read the server's response and print out.
       # The server may send more than one line, so use readpartial

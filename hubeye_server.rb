@@ -1,4 +1,3 @@
-#!/usr/bin/env ruby
 require 'socket'
 require 'open-uri'
 require 'nokogiri'
@@ -9,7 +8,10 @@ log = STDOUT              # Send log messages to standard out
 ary_commits_repos = []
 hubeye_tracker = []
 oncearound = 10
-username = "luke-gru"
+#USERNAME: defined in ~/.hubeyerc
+USERNAME = 'luke-gru'
+#username: changes if input includes a '/' for removing, adding tracked repos
+username = 'luke-gru'
 @remote_connection = false
 
 while true
@@ -68,7 +70,11 @@ while true
       client = server.accept    # Accept a new client
       sockets << client       # Add it to the set of sockets
       # Tell the client what and where it has connected.
-      client.puts "Hubeye running on #{Socket.gethostname}"
+      unless hubeye_tracker.empty?
+        client.puts "Hubeye running on #{Socket.gethostname}\nTracking: #{hubeye_tracker.join(' ')}"
+      else
+        client.puts "Hubeye running on #{Socket.gethostname}"
+      end
       client.flush
       # And log the fact that the client connected
       log.puts "Accepted connection from #{client.peeraddr[2]}"
@@ -85,7 +91,6 @@ while true
         socket.close      # Close it
         next          # And go on to the next
       end
-
 
       if (input.strip.downcase == "quit")      # If the client asks to quit
         socket.puts("Bye!");    # Say goodbye
@@ -113,20 +118,47 @@ while true
         exit
       else # Otherwise, client is not quitting
 
-
-
         if input == '.'
-          repo_name = File.expand_path(".").split("/").last
-        elsif input.include?("/")
-          username, repo_name = input.split("/")
+          repo_name = File.dirname(__FILE__).split("/").last
         elsif input.strip == ''
           socket.puts("")
           next
+        elsif %r{rm ([\w-](diiv)?[\w-]*)} =~ input
+          if $1.include?("diiv")
+            username, repo_name = $1.split('diiv')
+          else
+            username, repo_name = "#{username}/#{$1}".split('/')
+          end
+
+          begin
+            index_found = ary_commits_repos.index("#{username}/#{repo_name}")
+            if index_found
+              #consecutive indices in the array
+              for i in 1..2
+                ary_commits_repos.delete_at(index_found)
+              end
+              hubeye_tracker.delete("#{username}/#{repo_name}")
+              socket.puts("Stopped watching repository #{username}/#{repo_name}")
+              sleep 0.5
+              next
+            else
+              socket.puts("Repository #{username}/#{repo_name} not currently being watched")
+              next
+            end
+          rescue
+            socket.puts($!)
+            next
+          end
+        elsif input.include?('diiv')
+          #includes a '/', such as rails/rails, but in the adding to tracker context
+          username, repo_name = input.split('diiv')
         else
+          #if the input is not the above special scenarios
           repo_name = input
         end
 
         begin
+            #if adding a repo with another username
           doc = Nokogiri::HTML(open("https://github.com/#{username}/#{repo_name}"))
         rescue OpenURI::HTTPError
           socket.puts("Not a Github repository!")
@@ -135,7 +167,6 @@ while true
           socket.puts("Not a valid URI")
           next
         end
-
 
         doc.xpath('//div[@class = "message"]/pre').each do |node|
           @commit_msg = node.text
@@ -172,5 +203,7 @@ while true
       end
     end
   end
+  username = USERNAME
+  #reassign username to the username in ~/.hubeyerc
 end
 
