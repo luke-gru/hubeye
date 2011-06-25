@@ -19,6 +19,8 @@ hubeye_tracker = []
 oncearound = 10
 #USERNAME: defined in ~/.hubeyerc
 USERNAME = 'luke-gru'
+#find Desktop notification system
+DESKTOP_NOTIFICATION = Notification.find_notify 
 #username: changes if input includes a '/' for removing, adding tracked repos
 username = 'luke-gru'
 @remote_connection = false
@@ -53,8 +55,6 @@ while true
               @committer = node.text
             end
 
-            #find Desktop notification system
-            DESKTOP_NOTIFICATION = Notification.find_notify 
 
             if DESKTOP_NOTIFICATION == "libnotify"
             Autotest::GnomeNotify.notify("Hubeye", "Repo #{repo} has changed\nNew commit: #{@commit_compare} => #{@committer}", Autotest::GnomeNotify::CHANGE_ICON)

@@ -10,6 +10,9 @@ module Notification
       else
         raise "libnotify-bin needs to be installed in order to receive Desktop notifications."
       end
+    elsif RUBY_PLATFORM =~ /darwin/i
+      require_relative "growl"
+      return "growl"
     end
   end
 end
