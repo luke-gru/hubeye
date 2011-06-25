@@ -2,21 +2,14 @@ require 'socket'
 require 'open-uri'
 
 begin
-require 'nokogiri'
+  require 'nokogiri'
 rescue LoadError
   require 'rubygems'
   gem 'nokogiri'
   require 'nokogiri'
 end
 
-begin
-require 'autotest'
-rescue LoadError
-  require 'rubygems'
-  gem 'autotest-notification'
-  require 'autotest'
-end
-
+require File.dirname(__FILE__) + "/notification/notification"
 
 server = TCPServer.open(2000)       # Listen on port 2000
 sockets = [server]            # An array of sockets we'll monitor
@@ -55,23 +48,18 @@ while true
           else
             #notify of change to repository
             #if they have libnotify installed
-            module Autotest::GnomeNotify
-              EXPIRATION_IN_SECONDS = 2
-              dir =  File.dirname(__FILE__)
-              CHANGE_ICON = File.dirname(dir) + "/hubeye/images/change_icon.jpg"
-
-              def self.notify(title, msg, img)
-                options = "-t #{EXPIRATION_IN_SECONDS * 1000} -i #{img}"
-                system "notify-send #{options} '#{title}' '#{msg}'"
-              end
-
-            end
 
             doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
               @committer = node.text
             end
 
+            #find Desktop notification system
+            DESKTOP_NOTIFICATION = Notification.find_notify 
+
+            if DESKTOP_NOTIFICATION == "libnotify"
             Autotest::GnomeNotify.notify("Hubeye", "Repo #{repo} has changed\nNew commit: #{@commit_compare} => #{@committer}", Autotest::GnomeNotify::CHANGE_ICON)
+            else
+            end
 
             ary_commits_repos << repo
             ary_commits_repos << @commit_compare
