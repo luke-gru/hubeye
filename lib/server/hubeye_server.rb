@@ -4,19 +4,21 @@ require 'open-uri'
 begin
   require 'nokogiri'
 rescue LoadError
-  require 'rubygems'
-  gem 'nokogiri'
-  require 'nokogiri'
+  if require 'rubygems'
+    retry
+  else
+    abort 'Nokogiri is needed to run hubeye. Gem install nokogiri'
+  end
 end
 
-require File.dirname(__FILE__) + "/notification/notification"
+require "#{Environment::LIBDIR}/notification/notification"
 
 server = TCPServer.open(2000)       # Listen on port 2000
 sockets = [server]            # An array of sockets we'll monitor
 log = STDOUT              # Send log messages to standard out
 ary_commits_repos = []
 hubeye_tracker = []
-oncearound = 10
+oncearound = 30
 #USERNAME: defined in ~/.hubeyerc
 USERNAME = 'luke-gru'
 #find Desktop notification system
@@ -57,7 +59,8 @@ while true
 
 
             if DESKTOP_NOTIFICATION == "libnotify"
-            Autotest::GnomeNotify.notify("Hubeye", "Repo #{repo} has changed\nNew commit: #{@commit_compare} => #{@committer}", Autotest::GnomeNotify::CHANGE_ICON)
+              require "#{Environment::LIBDIR}/notification/gnomenotify"
+              Autotest::GnomeNotify.notify("Hubeye", "Repo #{repo} has changed\nNew commit: #{@commit_compare} => #{@committer}", Autotest::GnomeNotify::CHANGE_ICON)
             else
             end
 

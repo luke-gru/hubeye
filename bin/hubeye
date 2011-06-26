@@ -1,0 +1,14 @@
+#!/usr/bin/env ruby
+
+begin
+  require 'daemons'
+rescue
+  require 'rubygems'
+  retry
+end
+
+#require environment file
+require File.join(File.expand_path(".", ".."), "lib/environment")
+
+#run server as daemon
+Daemons.run(File.join(Environment::LIBDIR, '/server/hubeye_server.rb'))

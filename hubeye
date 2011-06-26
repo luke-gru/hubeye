@@ -1,9 +1,0 @@
-#!/usr/bin/env ruby
-begin
-  require 'daemons'
-rescue
-  require 'rubygems'
-  retry
-end
-
-Daemons.run('hubeye_server.rb')
