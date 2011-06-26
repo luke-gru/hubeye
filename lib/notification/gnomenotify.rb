@@ -1,8 +1,11 @@
 begin
   require 'autotest'
 rescue LoadError
-  require 'rubygems'
-  retry
+  if require 'rubygems'
+    retry
+  else
+    abort 'Autotest is needed to run hubeye. Gem install autotest'
+  end
 end
 
 module Autotest::GnomeNotify

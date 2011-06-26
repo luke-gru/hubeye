@@ -140,7 +140,7 @@ while true
       else # Otherwise, client is not quitting
 
         if input == '.'
-          repo_name = File.dirname(__FILE__).split("/").last
+          repo_name = Environment::ROOTDIR.split("/").last
         elsif input.strip == ''
           socket.puts("")
           next
