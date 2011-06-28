@@ -1,6 +1,7 @@
 module Environment
 
-ROOTDIR = File.expand_path(".", "..")
+ROOTDIR = File.join(File.dirname(__FILE__), "..")
+
 LIBDIR = File.join(ROOTDIR, "lib")
 BINDIR = File.join(ROOTDIR, "bin")
 

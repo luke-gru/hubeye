@@ -15,17 +15,33 @@ require "#{Environment::LIBDIR}/notification/notification"
 
 server = TCPServer.open(2000)       # Listen on port 2000
 sockets = [server]            # An array of sockets we'll monitor
-log = STDOUT              # Send log messages to standard out
 ary_commits_repos = []
 hubeye_tracker = []
 oncearound = 30
 #USERNAME: defined in ~/.hubeyerc
 USERNAME = 'luke-gru'
 #find Desktop notification system
-DESKTOP_NOTIFICATION = Notification.find_notify 
+DESKTOP_NOTIFICATION = Notification::Finder.find_notify 
 #username: changes if input includes a '/' for removing, adding tracked repos
 username = 'luke-gru'
 @remote_connection = false
+
+class Logger
+
+  def self.log(msg)
+    File.open(ENV['HOME'] + "/hublog" * 2, "a") do |f|
+      f.puts(msg)
+    end
+  end
+
+  def self.relog(msg)
+    #wipe the file and start anew
+    File.open(ENV['HOME'] + "/hublog" * 2, "w") do |f|
+      f.puts(msg)
+    end
+  end
+
+end
 
 while true
 
@@ -56,7 +72,6 @@ while true
             doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
               @committer = node.text
             end
-
 
             if DESKTOP_NOTIFICATION == "libnotify"
               require "#{Environment::LIBDIR}/notification/gnomenotify"
@@ -98,16 +113,22 @@ while true
       end
       client.flush
       # And log the fact that the client connected
-      log.puts "Accepted connection from #{client.peeraddr[2]}"
-      log.puts "local:  #{client.addr}"
-      log.puts "peer :  #{client.peeraddr}"
+      if @still_logging == true
+        #if the client quit, do not wipe the log file
+        Logger.log "Accepted connection from #{client.peeraddr[2]}"
+      else
+        #wipe the log file and start anew
+        Logger.relog "Accepted connection from #{client.peeraddr[2]}"
+      end
+      Logger.log "local:  #{client.addr}"
+      Logger.log "peer :  #{client.peeraddr}"
     else              # Otherwise, a client is ready
       input = socket.gets       # Read input from the client
       input.chop!           # Trim client's input
 
       # If no input, the client has disconnected
       if !input
-        log.puts "Client on #{socket.peeraddr[2]} disconnected."
+        Logger.log "Client on #{socket.peeraddr[2]} disconnected."
         sockets.delete(socket)  # Stop monitoring this socket
         socket.close      # Close it
         next          # And go on to the next
@@ -115,23 +136,25 @@ while true
 
       if (input.strip.downcase == "quit")      # If the client asks to quit
         socket.puts("Bye!");    # Say goodbye
-        log.puts "Closing connection to #{socket.peeraddr[2]}"
+        Logger.log "Closing connection to #{socket.peeraddr[2]}"
         @remote_connection = false
         if !ary_commits_repos.empty?
-          print "Tracking: "
+          Logger.log "Tracking: "
           ary_commits_repos.each do |repo|
-            print repo + " " if ary_commits_repos.index(repo).even?
+            Logger.log repo if ary_commits_repos.index(repo).even?
             hubeye_tracker.uniq!
           end
-          log.puts
         end
-        log.puts #to look pretty when multiple connections per loop
+        Logger.log "" #to look pretty when multiple connections per loop
         sockets.delete(socket)  # Stop monitoring the socket
         socket.close      # Terminate the session
+        @still_logging = true
       elsif (input.strip.downcase == "shutdown")
         #local
-        log.puts "Closing connection to #{socket.peeraddr[2]}"
-        log.puts "Shutting down..."
+        Logger.log "Closing connection to #{socket.peeraddr[2]}"
+        Logger.log "Shutting down..."
+        Logger.log ""
+        Logger.log ""
         #peer
         socket.puts("Shutting down server")
         sockets.delete(socket)
@@ -140,7 +163,8 @@ while true
       else # Otherwise, client is not quitting
 
         if input == '.'
-          repo_name = Environment::ROOTDIR.split("/").last
+          #fix this to take the pwd of the hubeye_client
+          repo_name = `pwd`.split("/").last.chomp
         elsif input.strip == ''
           socket.puts("")
           next
@@ -205,7 +229,7 @@ while true
             @info =  node.text.strip!.gsub(/\n/, '').gsub(/tree/, "\ntree").gsub(/parent.*?(\w)/, "\nparent  \\1")
           end
           @msg =  "#{@commit_msg} => #{@committer}".gsub(/\(author\)/, '')
-          log.puts("#{ary_commits_repos.inspect}")
+          Logger.log("#{ary_commits_repos.inspect}")
           socket.puts("#{@info}\n#{@msg}")
 
         elsif !ary_commits_repos.include?(@commit_msg)

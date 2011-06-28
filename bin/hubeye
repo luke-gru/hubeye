@@ -8,7 +8,7 @@ rescue
 end
 
 #require environment file
-require File.join(File.expand_path(".", ".."), "lib/environment")
+require File.join(File.dirname(__FILE__), "../lib/environment")
 
 #run server as daemon
 Daemons.run(File.join(Environment::LIBDIR, '/server/hubeye_server.rb'))
