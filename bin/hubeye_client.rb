@@ -30,7 +30,11 @@ begin
       STDOUT.flush          # Make sure the prompt is visible
       local = STDIN.gets        # Read line from the console
       #break if !local             # Quit if no input from console
-      s.puts(local.gsub(/\//, 'diiv'))    # Send the line to the server, daemons gem strips some special chars (/, :)
+      if local.match(/^\.$/) #pwd
+        s.puts(local.gsub(/\A\.\Z/, "pwd" + Dir.pwd.split('/').last))    # Send the line to the server, daemons gem strips some special chars (/, :)
+      else
+        s.puts(local.gsub(/\//, 'diiv'))
+      end
       s.flush               # Force it out
       # Read the server's response and print out.
       # The server may send more than one line, so use readpartial

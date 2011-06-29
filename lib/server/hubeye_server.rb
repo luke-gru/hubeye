@@ -41,6 +41,18 @@ class Logger
     end
   end
 
+  def self.log_change(repo_name, commit_msg, committer, socket)
+    change_msg = <<-MSG
+    ===============================
+    Repository: #{repo_name.downcase.strip} has changed (#{Time.now})
+    Commit msg: #{commit_msg}
+     Committer: #{committer}
+    ===============================
+    MSG
+    socket.puts(change_msg)
+    Logger.log(change_msg)
+  end
+
 end
 
 while true
@@ -135,7 +147,7 @@ while true
       end
 
       if (input.strip.downcase == "quit")      # If the client asks to quit
-        socket.puts("Bye!");    # Say goodbye
+        socket.puts("Bye!")   # Say goodbye
         Logger.log "Closing connection to #{socket.peeraddr[2]}"
         @remote_connection = false
         if !ary_commits_repos.empty?
@@ -145,10 +157,11 @@ while true
             hubeye_tracker.uniq!
           end
         end
-        Logger.log "" #to look pretty when multiple connections per loop
+        Logger.log "" # to look pretty when multiple connections per loop
         sockets.delete(socket)  # Stop monitoring the socket
         socket.close      # Terminate the session
         @still_logging = true
+
       elsif (input.strip.downcase == "shutdown")
         #local
         Logger.log "Closing connection to #{socket.peeraddr[2]}"
@@ -162,9 +175,9 @@ while true
         exit
       else # Otherwise, client is not quitting
 
-        if input == '.'
-          #fix this to take the pwd of the hubeye_client
-          repo_name = `pwd`.split("/").last.chomp
+        #this means the user pressed '.' in the client, wanting to track the pwd
+        if input.match(/^pwd/)
+          repo_name = input[3..-1]
         elsif input.strip == ''
           socket.puts("")
           next
@@ -229,18 +242,23 @@ while true
             @info =  node.text.strip!.gsub(/\n/, '').gsub(/tree/, "\ntree").gsub(/parent.*?(\w)/, "\nparent  \\1")
           end
           @msg =  "#{@commit_msg} => #{@committer}".gsub(/\(author\)/, '')
-          Logger.log("#{ary_commits_repos.inspect}")
+          #log the fact that the user added a repo to be tracked
+          Logger.log("Added to tracker: #{ary_commits_repos[-2]}")
+          #show the user, via the client, the info and commit msg for the commit
           socket.puts("#{@info}\n#{@msg}")
 
         elsif !ary_commits_repos.include?(@commit_msg)
-          index_of_msg = ary_commits_repos.index(input) + 1
+          begin
+          index_of_msg = ary_commits_repos.index(username + "/" + repo_name) + 1
           ary_commits_repos.delete_at(index_of_msg)
           ary_commits_repos.insert(index_of_msg - 1, @commit_msg)
-          socket.puts("===============================")
-          socket.puts("Repository: #{repo_name.downcase.strip} has changed")
-          socket.puts("Commit msg: #{@commit_msg}") 
-          socket.puts(" Committer: #{@committer}")
-          socket.puts("===============================")
+
+          #log to the logfile and tell the client
+          Logger.log_change(repo_name, @commit_msg, @committer, socket)
+          rescue
+            socket.puts($!)
+          end
+
         else
           socket.puts("Repository #{repo_name.downcase.strip} has not changed")
         end
