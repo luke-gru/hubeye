@@ -11,7 +11,8 @@ rescue LoadError
   end
 end
 
-require "#{Environment::LIBDIR}/notification/notification"
+require "notification/notification"
+require "log/logger"
 
 server = TCPServer.open(2000)       # Listen on port 2000
 sockets = [server]            # An array of sockets we'll monitor
@@ -21,39 +22,11 @@ oncearound = 30
 #USERNAME: defined in ~/.hubeyerc
 USERNAME = 'luke-gru'
 #find Desktop notification system
-DESKTOP_NOTIFICATION = Notification::Finder.find_notify 
+DESKTOP_NOTIFICATION = Notification::Finder.find_notify
 #username: changes if input includes a '/' for removing, adding tracked repos
 username = 'luke-gru'
 @remote_connection = false
 
-class Logger
-
-  def self.log(msg)
-    File.open(ENV['HOME'] + "/hublog" * 2, "a") do |f|
-      f.puts(msg)
-    end
-  end
-
-  def self.relog(msg)
-    #wipe the file and start anew
-    File.open(ENV['HOME'] + "/hublog" * 2, "w") do |f|
-      f.puts(msg)
-    end
-  end
-
-  def self.log_change(repo_name, commit_msg, committer, socket)
-    change_msg = <<-MSG
-    ===============================
-    Repository: #{repo_name.downcase.strip} has changed (#{Time.now})
-    Commit msg: #{commit_msg}
-     Committer: #{committer}
-    ===============================
-    MSG
-    socket.puts(change_msg)
-    Logger.log(change_msg)
-  end
-
-end
 
 while true
 
@@ -71,7 +44,6 @@ while true
         doc.xpath('//div[@class = "message"]/pre').each do |node|
           @commit_compare = node.text
           if ary_commits_repos.include?(@commit_compare)
-            puts repo + " hasn't changed"
             oncearound.times do
               sleep 1
               @remote_connection = client_connected(sockets) ? true : false
@@ -89,6 +61,10 @@ while true
               require "#{Environment::LIBDIR}/notification/gnomenotify"
               Autotest::GnomeNotify.notify("Hubeye", "Repo #{repo} has changed\nNew commit: #{@commit_compare} => #{@committer}", Autotest::GnomeNotify::CHANGE_ICON)
             else
+              #TODO: check to see if the pid of the server is associated with a
+              #terminal (or check the arguments for a -t). If found, log a
+              #change to the repo to the terminal with the time in the same
+              #format as the log page
             end
 
             ary_commits_repos << repo
@@ -106,7 +82,6 @@ while true
   end
 
   ready = select(sockets)
-  p sockets
 
   def client_connected(sockets)
     select(sockets, nil, nil, 2)
@@ -122,6 +97,10 @@ while true
         client.puts "Hubeye running on #{Socket.gethostname}\nTracking: #{hubeye_tracker.join(' ')}"
       else
         client.puts "Hubeye running on #{Socket.gethostname}"
+        #TODO: if not daemonized, (by checking ps ax for hubeye start -t)
+        #term = `ps ax | grep "hubeye start -t"`.scan(/.*\n/).first
+        #term =~ /pts/
+        puts "Client connected at #{Time.now.strftime("%m/%d/%Y at %I:%M%p")}"
       end
       client.flush
       # And log the fact that the client connected
@@ -165,7 +144,7 @@ while true
       elsif (input.strip.downcase == "shutdown")
         #local
         Logger.log "Closing connection to #{socket.peeraddr[2]}"
-        Logger.log "Shutting down..."
+        Logger.log "Shutting down... (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})"
         Logger.log ""
         Logger.log ""
         #peer
@@ -243,7 +222,7 @@ while true
           end
           @msg =  "#{@commit_msg} => #{@committer}".gsub(/\(author\)/, '')
           #log the fact that the user added a repo to be tracked
-          Logger.log("Added to tracker: #{ary_commits_repos[-2]}")
+          Logger.log("Added to tracker: #{ary_commits_repos[-2]} (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})")
           #show the user, via the client, the info and commit msg for the commit
           socket.puts("#{@info}\n#{@msg}")
 
