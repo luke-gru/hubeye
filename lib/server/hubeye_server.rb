@@ -23,9 +23,16 @@ module Server
 
   def start(port)
     listen(port)
-    setup_env
+    setup_env()
     _loop do
-
+      catch(:next) do
+      not_connected() unless @remote_connection
+      client_connect(@sockets)
+      parse_input()
+      get_github_doc()
+      parse_doc()
+      @username = USERNAME
+      end
     end
   end
 
@@ -72,7 +79,6 @@ module Server
             else
               #notify of change to repository
               #if they have libnotify installed
-
               doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
                 @committer = node.text
               end
@@ -89,7 +95,7 @@ module Server
               @ary_commits_repos << repo
               @ary_commits_repos << @commit_compare
               #delete the repo and old commit that appear first in the array
-              index_old_HEAD = ary_commits_repos.index(repo)
+              index_old_HEAD = @ary_commits_repos.index(repo)
               @ary_commits_repos.delete_at(index_old_HEAD)
               #and again to get rid of the commit message
               @ary_commits_repos.delete_at(index_old_HEAD)
@@ -104,7 +110,7 @@ module Server
   def client_ready(sockets)
     select(sockets, nil, nil, 2)
   end
-  private :client_connected
+  private :client_ready
 
   def client_connect(sockets)
     ready = select(sockets)
@@ -112,6 +118,7 @@ module Server
     readable.each do |socket|         # Loop through readable sockets
       if socket == @server         # If the server socket is ready
         client = @server.accept    # Accept a new client
+        @socket = client
         sockets << client       # Add it to the set of sockets
         # Tell the client what and where it has connected.
         unless @hubeye_tracker.empty?
@@ -134,25 +141,25 @@ module Server
         end
         Logger.log "local:  #{client.addr}"
         Logger.log "peer :  #{client.peeraddr}"
-      else              # Otherwise, a client is ready
-        @input = get_input(socket)
       end
     end
+    @input = get_input(@socket)
   end
 
 
   def get_input(socket)
-    @input = socket.gets       # Read input from the client
-    @input.chop!           # Trim client's input
+    input = socket.gets       # Read input from the client
+    input.chop!           # Trim client's input
     # If no input, the client has disconnected
 
-    if !@input
+    if !input
       Logger.log "Client on #{socket.peeraddr[2]} disconnected."
-      sockets.delete(socket)  # Stop monitoring this socket
+      @sockets.delete(socket)  # Stop monitoring this socket
       socket.close      # Close it
-      next          # And go on to the next
+      throw(:next)      # And go on to the next
+    else
+      return input
     end
-
   end
   private :get_input
 
@@ -166,7 +173,7 @@ module Server
     elsif fullpath_add = parse_fullpath_add()
     elsif add = parse_add()
     else
-
+      raise InputError "Invalid input"
     end
   end
 
@@ -189,7 +196,7 @@ module Server
     else
       return
     end
-    return true
+    throw(:next)
   end
 
   def parse_shutdown
@@ -204,7 +211,7 @@ module Server
     else
       return
     end
-    return true
+    shutdown()
   end
 
   def shutdown
@@ -228,7 +235,7 @@ module Server
     if @input.strip == ''
       @socket.puts("")
       #replace with throw
-      next
+      throw(:next)
     else
       return
     end
@@ -253,14 +260,14 @@ module Server
           @hubeye_tracker.delete("#{@username}/#{@repo_name}")
           @socket.puts("Stopped watching repository #{@username}/#{@repo_name}")
           sleep 0.5
-          next
+          throw(:next)
         else
           @socket.puts("Repository #{@username}/#{@repo_name} not currently being watched")
-          next
+          throw(:next)
         end
       rescue
         @socket.puts($!)
-        next
+        throw(:next)
       end
     else
       return
@@ -285,56 +292,84 @@ module Server
   def get_github_doc
     begin
       #if adding a repo with another username
-      doc = Nokogiri::HTML(open("https://github.com/#{@username}/#{@repo_name}"))
+      @doc = Nokogiri::HTML(open("https://github.com/#{@username}/#{@repo_name}"))
     rescue OpenURI::HTTPError
       @socket.puts("Not a Github repository!")
-      next
+      throw(:next)
     rescue URI::InvalidURIError
       @socket.puts("Not a valid URI")
-      next
+      throw(:next)
     end
   end
 
-        doc.xpath('//div[@class = "message"]/pre').each do |node|
-          @commit_msg = node.text
-        end
+  def parse_doc
+    #get commit msg
+    @commit_msg = parse_msg()
+    #get committer
+    @committer = parse_committer()
 
-        doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
-          @committer = node.text
-        end
+    #new repo to track
+    if !@ary_commits_repos.include?("#{@username}/#{@repo_name}".downcase.strip)
+      @ary_commits_repos << "#{@username}/#{@repo_name}"
+      @ary_commits_repos << @commit_msg
+      #get commit info
+      @info = parse_info()
+      @msg =  "#{@commit_msg} => #{@committer}".gsub(/\(author\)/, '')
+      #log the fact that the user added a repo to be tracked
+      Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})")
+      #show the user, via the client, the info and commit msg for the commit
+      @socket.puts("#{@info}\n#{@msg}")
 
-        if !ary_commits_repos.include?("#{username}/#{repo_name}".downcase.strip)
-          ary_commits_repos << "#{username}/#{repo_name}"
-          ary_commits_repos << @commit_msg
+    #new commit to tracked repo
+    elsif !@ary_commits_repos.include?(@commit_msg)
+      begin
+        index_of_msg = @ary_commits_repos.index(@username + "/" + @repo_name) + 1
+        @ary_commits_repos.delete_at(index_of_msg)
+        @ary_commits_repos.insert(index_of_msg - 1, @commit_msg)
 
-          doc.xpath('//div[@class = "machine"]').each do |node|
-            @info =  node.text.strip!.gsub(/\n/, '').gsub(/tree/, "\ntree").gsub(/parent.*?(\w)/, "\nparent  \\1")
-          end
-          @msg =  "#{@commit_msg} => #{@committer}".gsub(/\(author\)/, '')
-          #log the fact that the user added a repo to be tracked
-          Logger.log("Added to tracker: #{ary_commits_repos[-2]} (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})")
-          #show the user, via the client, the info and commit msg for the commit
-          socket.puts("#{@info}\n#{@msg}")
-
-        elsif !ary_commits_repos.include?(@commit_msg)
-          begin
-            index_of_msg = ary_commits_repos.index(username + "/" + repo_name) + 1
-            ary_commits_repos.delete_at(index_of_msg)
-            ary_commits_repos.insert(index_of_msg - 1, @commit_msg)
-
-            #log to the logfile and tell the client
-            Logger.log_change(repo_name, @commit_msg, @committer, socket)
-          rescue
-            socket.puts($!)
-          end
-
-        else
-          socket.puts("Repository #{repo_name.downcase.strip} has not changed")
-        end
-
+        #log to the logfile and tell the client
+        Logger.log_change(@repo_name, @commit_msg, @committer, @socket)
+      rescue
+        @socket.puts($!)
       end
+
+    else
+      #no change
+      @socket.puts("Repository #{@repo_name.downcase.strip} has not changed")
     end
   end
-  username = USERNAME
-  #reassign username to the username in ~/.hubeyerc
+
+  def parse_msg
+    #get commit msg
+    @doc.xpath('//div[@class = "message"]/pre').each do |node|
+      return commit_msg = node.text
+    end
+  end
+
+  def parse_committer
+    @doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
+      return committer = node.text
+    end
+  end
+
+  def parse_info
+    @doc.xpath('//div[@class = "machine"]').each do |node|
+      return info =  node.text.strip!.gsub(/\n/, '').gsub(/tree/, "\ntree").gsub(/parent.*?(\w)/, "\nparent  \\1")
+    end
+  end
+
+end #of of Server module
+
+class Hubeye_Server
+  include Server
 end
+
+server = Hubeye_Server.new
+server.start(2000)
+
+
+
+
+  #END
+  #username = USERNAME
+  #reassign username to the username in ~/.hubeyerc
