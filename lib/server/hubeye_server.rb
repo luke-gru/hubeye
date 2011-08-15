@@ -21,6 +21,8 @@ module Server
   #find Desktop notification system
   DESKTOP_NOTIFICATION = Notification::Finder.find_notify
 
+  class InputError < StandardError; end
+
   def start(port)
     listen(port)
     setup_env()
@@ -164,13 +166,14 @@ module Server
   private :get_input
 
   def parse_input
-    quit = parse_quit()
-    if quit
+    @input.strip!
+    if quit = parse_quit()
     elsif shut = parse_shutdown()
     elsif pwd = parse_pwd()
     elsif empty = parse_empty()
     elsif remove = parse_remove()
     elsif fullpath_add = parse_fullpath_add()
+    elsif hook = parse_hook()
     elsif add = parse_add()
     else
       raise InputError "Invalid input"
@@ -178,7 +181,7 @@ module Server
   end
 
   def parse_quit
-    if @input.strip.downcase == "quit"      # If the client asks to quit
+    if @input =~ /\Aquit|exit\Z/i      # If the client asks to quit
       @socket.puts("Bye!")   # Say goodbye
       Logger.log "Closing connection to #{@socket.peeraddr[2]}"
       @remote_connection = false
@@ -200,7 +203,7 @@ module Server
   end
 
   def parse_shutdown
-    if @input.strip.downcase == "shutdown"
+    if @input.downcase == "shutdown"
       #local
       Logger.log "Closing connection to #{@socket.peeraddr[2]}"
       Logger.log "Shutting down... (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})"
@@ -220,9 +223,30 @@ module Server
     exit
   end
 
+  def parse_hook
+    if @input =~ /^githook add ([^\s]+) cmd: (.*)$/i
+      require "hooks/git_hooks"
+      @hook_cmds ||= {}
+      #repo is the key, cmds are arrays of values (allowing same repo to have
+      #numerous hooks methods)
+      if @hook_cmds[$1]
+        @hook_cmds[$1] << $2
+      else
+        @hook_cmds[$1] = [$2]
+      end
+
+    else
+      return
+    end
+    p @hook_cmds
+    @socket.puts("Hook added")
+    throw(:next)
+  end
+
 
   def parse_pwd
-    #this means the user pressed '.' in the client, wanting to track the pwd
+    #this means the user pressed '.' in the client,
+    #wanting to track the pwd repo
     if @input.match(/^pwd/)
       @repo_name = @input[3..-1]
     else
@@ -232,7 +256,7 @@ module Server
   end
 
   def parse_empty
-    if @input.strip == ''
+    if @input == ''
       @socket.puts("")
       #replace with throw
       throw(:next)
@@ -284,7 +308,8 @@ module Server
     end
     return true
   end
-          #if the input is not the above special scenarios
+
+  #if the input is not the above special scenarios
   def parse_add
     @repo_name = @input
   end
