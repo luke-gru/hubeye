@@ -29,7 +29,8 @@ module Server
     _loop do
       catch(:next) do
       not_connected() unless @remote_connection
-      client_connect(@sockets)
+      get_input(@socket)
+      puts @input
       parse_input()
       get_github_doc()
       parse_doc()
@@ -105,8 +106,9 @@ module Server
           end
         end
         redo unless @remote_connection
-      end
+      end #end of (while remote_connection == false)
     end
+    client_connect(@sockets)
   end
 
   def client_ready(sockets)
@@ -145,22 +147,18 @@ module Server
         Logger.log "peer :  #{client.peeraddr}"
       end
     end
-    @input = get_input(@socket)
   end
 
 
   def get_input(socket)
-    input = socket.gets       # Read input from the client
-    input.chop!           # Trim client's input
+    @input = socket.gets       # Read input from the client
+    @input.chop!           # Trim client's input
     # If no input, the client has disconnected
-
-    if !input
+    if !@input
       Logger.log "Client on #{socket.peeraddr[2]} disconnected."
       @sockets.delete(socket)  # Stop monitoring this socket
       socket.close      # Close it
       throw(:next)      # And go on to the next
-    else
-      return input
     end
   end
   private :get_input
@@ -172,11 +170,12 @@ module Server
     elsif pwd = parse_pwd()
     elsif empty = parse_empty()
     elsif remove = parse_remove()
-    elsif fullpath_add = parse_fullpath_add()
+    #hook must be before parse_fullpath_add
     elsif hook = parse_hook()
+    elsif fullpath_add = parse_fullpath_add()
     elsif add = parse_add()
     else
-      raise InputError "Invalid input"
+      raise InputError "Invalid input #{@input}"
     end
   end
 
@@ -217,29 +216,38 @@ module Server
     shutdown()
   end
 
+
   def shutdown
     @sockets.delete(@socket)
     @socket.close
     exit
   end
 
+
   def parse_hook
-    if @input =~ /^githook add ([^\s]+) cmd: (.*)$/i
+    #if @input =~ /\Agithook add (\w+?(diiv)\w+) cmd: (.*)\Z/i
+    if %r{githook} =~ @input
+      @input.gsub!(/diiv/, '/')
+      #make match globals parse input
+      @input =~ /add ([^\/]+\/\w+) cmd: (.*)\Z/i
       require "hooks/git_hooks"
       @hook_cmds ||= {}
       #repo is the key, cmds are arrays of values (allowing same repo to have
       #numerous hooks methods)
-      if @hook_cmds[$1]
-        @hook_cmds[$1] << $2
+      if $1 != nil || $2 != nil
+        if @hook_cmds[$1]
+          @hook_cmds[$1] << $2
+        else
+          @hook_cmds[$1] = [$2]
+        end
+        @socket.puts("Hook added")
       else
-        @hook_cmds[$1] = [$2]
+        @socket.puts("Format: 'githook add user/repo cmd: git pull origin'")
       end
-
     else
       return
     end
     p @hook_cmds
-    @socket.puts("Hook added")
     throw(:next)
   end
 
@@ -258,7 +266,6 @@ module Server
   def parse_empty
     if @input == ''
       @socket.puts("")
-      #replace with throw
       throw(:next)
     else
       return
@@ -267,7 +274,7 @@ module Server
   end
 
   def parse_remove
-    if %r{rm ([\w-](diiv)?[\w-]*)} =~ @input
+    if %r{\Arm ([\w-](diiv)?[\w-]*)\Z} =~ @input
       if $1.include?("diiv")
         @username, @repo_name = $1.split('diiv')
       else
@@ -392,9 +399,3 @@ end
 server = Hubeye_Server.new
 server.start(2000)
 
-
-
-
-  #END
-  #username = USERNAME
-  #reassign username to the username in ~/.hubeyerc
