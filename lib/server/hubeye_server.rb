@@ -14,6 +14,7 @@ module Server
 
   require "notification/notification"
   require "log/logger"
+  require "timehelper/timehelper"
 
   ONCEAROUND = 30
   #USERNAME: defined in ~/.hubeyerc
@@ -115,22 +116,22 @@ module Server
               case DESKTOP_NOTIFICATION
               when "libnotify"
                 Autotest::GnomeNotify.notify("Hubeye", change_msg)
-                Logger.log_change(repo, commit, committer)
+                Logger.log_change(repo, commit_msg, committer)
               when "growl"
                 Autotest::Growl.growl("Hubeye", change_msg)
-                Logger.log_change(repo, commit, committer)
+                Logger.log_change(repo, commit_msg, committer)
               when nil
 
                 if @daemonized
-                  Logger.log_change(repo, commit, committer)
+                  Logger.log_change(repo, commit_msg, committer)
                 else
-                  Logger.log_change(repo, commit, committer, :include_terminal => true)
+                  Logger.log_change(repo, commit_msg, committer, :include_terminal => true)
                 end
 
               end
 
               @ary_commits_repos << repo
-              @ary_commits_repos << @commit_compare
+              @ary_commits_repos << commit_msg
               #delete the repo and old commit that appear first in the array
               index_old_HEAD = @ary_commits_repos.index(repo)
               @ary_commits_repos.delete_at(index_old_HEAD)
@@ -161,23 +162,24 @@ module Server
         @socket = client
         sockets << client       # Add it to the set of sockets
         # Tell the client what and where it has connected.
-        unless @hubeye_tracker.empty?
-          client.puts "Hubeye running on #{Socket.gethostname}\nTracking: #{@hubeye_tracker.join(' ')}"
+        if !@hubeye_tracker.empty?
+          client.puts "Hubeye running on #{Socket.gethostname}\nTracking:#{@hubeye_tracker.join(' ')}"
         else
           client.puts "Hubeye running on #{Socket.gethostname}"
-          #TODO: if not daemonized, (by checking ps ax for hubeye start -t)
-          #term = `ps ax | grep "hubeye start -t"`.scan(/.*\n/).first
-          #term =~ /pts/
-          puts "Client connected at #{Time.now.strftime("%m/%d/%Y at %I:%M%p")}"
         end
+
+        if !@daemonized
+          puts "Client connected at #{::TimeHelper::NOW}"
+        end
+
         client.flush
         # And log the fact that the client connected
         if @still_logging == true
           #if the client quit, do not wipe the log file
-          Logger.log "Accepted connection from #{client.peeraddr[2]}"
+          Logger.log "Accepted connection from #{client.peeraddr[2]} (#{::TimeHelper::NOW})"
         else
           #wipe the log file and start anew
-          Logger.relog "Accepted connection from #{client.peeraddr[2]}"
+          Logger.relog "Accepted connection from #{client.peeraddr[2]} (#{::TimeHelper::NOW})"
         end
         Logger.log "local:  #{client.addr}"
         Logger.log "peer :  #{client.peeraddr}"
@@ -233,6 +235,7 @@ module Server
       Logger.log "" # to look pretty when multiple connections per loop
       @sockets.delete(@socket)  # Stop monitoring the socket
       @socket.close      # Terminate the session
+      #still_logging makes the server not wipe the log file
       @still_logging = true
     else
       return
@@ -245,7 +248,7 @@ module Server
     if @input.downcase == "shutdown"
       #local
       Logger.log "Closing connection to #{@socket.peeraddr[2]}"
-      Logger.log "Shutting down... (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})"
+      Logger.log "Shutting down... (#{::TimeHelper::NOW})"
       Logger.log ""
       Logger.log ""
       #peer
@@ -281,7 +284,7 @@ module Server
     @hook_cmds ||= {}
     #repo is the key, value is array of directory and commands. First element
     #of array is the local directory for that remote repo, rest are commands
-    #related to hooks called onchange of the remote repo
+    #related to hooks called on change of the remote repo
     if $1 != nil && $4 != nil
       if @hook_cmds[$1]
         @hook_cmds[$1] << $4
@@ -377,7 +380,6 @@ remote: #{remote}
     else
       return
     end
-    return true
   end
 
 
@@ -426,7 +428,7 @@ remote: #{remote}
       @info = parse_info()
       @msg =  "#{@commit_msg} => #{@committer}".gsub(/\(author\)/, '')
       #log the fact that the user added a repo to be tracked
-      Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})")
+      Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{::TimeHelper::NOW})")
       #show the user, via the client, the info and commit msg for the commit
       @socket.puts("#{@info}\n#{@msg}")
 
@@ -438,7 +440,14 @@ remote: #{remote}
         @ary_commits_repos.insert(index_of_msg - 1, @commit_msg)
 
         #log to the logfile and tell the client
-        Logger.log_change(@repo_name, @commit_msg, @committer, @socket)
+        if @daemonized
+          Logger.log_change(@repo_name, @commit_msg, @committer,
+                            :include_socket => true)
+        else
+          Logger.log_change(@repo_name, @commit_msg, @committer,
+                            :include_socket => true, :include_terminal => true)
+        end
+
       rescue
         @socket.puts($!)
       end

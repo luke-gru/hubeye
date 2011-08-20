@@ -14,7 +14,7 @@ class Logger
   end
 
   ##If {include_socket: true} is passed, then log to the client as well. If
-  #{include_terminal: true}, log to the terminal too. (make sure that the
+  #{include_terminal: true}, log to the terminal too (make sure that the
   #process is not daemonized). Always log to the logfile.
 
   def self.log_change(repo_name, commit_msg, committer, options={})
@@ -28,7 +28,9 @@ class Logger
     MSG
     if opts[:include_socket]
       socket.puts(change_msg)
-    elsif opts[:include_terminal]
+    end
+
+    if opts[:include_terminal]
       puts change_msg
     end
     Logger.log(change_msg)
