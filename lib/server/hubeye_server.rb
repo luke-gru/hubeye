@@ -30,7 +30,7 @@ module Server
       catch(:next) do
       not_connected() unless @remote_connection
       get_input(@socket)
-      puts @input
+      puts @input if @debug
       parse_input()
       get_github_doc()
       parse_doc()
@@ -39,9 +39,11 @@ module Server
     end
   end
 
+
   def listen(port)
     @server = TCPServer.open(port)       # Listen on port 2000
   end
+
 
   def setup_env
     @sockets = [@server]            # An array of sockets we'll monitor
@@ -50,6 +52,7 @@ module Server
     #username: changes if input includes a '/' for removing, adding tracked repos
     @username = 'luke-gru'
     @remote_connection = false
+    @daemonized = daemonized?
   end
 
 
@@ -58,6 +61,17 @@ module Server
       yield
     end
   end
+
+
+  def daemonized?
+    term = `ps ax | grep "hubeye start -t"`.scan(/.*\n/).first
+    if term =~ /pts/
+      return false
+    else
+      return true
+    end
+  end
+
 
   def not_connected
     #if no client is connected, but the commits array contains repos
@@ -80,16 +94,18 @@ module Server
                 break if @remote_connection
               end
             else
-              #notify of change to repository
-              #if they have libnotify installed
+              #There was a change a tracked repository.
               doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
                 @committer = node.text
               end
 
-              if DESKTOP_NOTIFICATION == "libnotify"
-                require "#{Environment::LIBDIR}/notification/gnomenotify"
+              #notify of change to repository
+              #if they have a Desktop notification
+              #library installed
+              case DESKTOP_NOTIFICATION
+              when "libnotify" || "growl"
                 Autotest::GnomeNotify.notify("Hubeye", "Repo #{repo} has changed\nNew commit: #{@commit_compare} => #{@committer}", Autotest::GnomeNotify::CHANGE_ICON)
-              else
+              when nil
                 #TODO: check to see if the pid of the server is associated with a
                 #terminal (or check the arguments for a -t). If found, log a
                 #change to the repo to the terminal with the time in the same
@@ -111,10 +127,12 @@ module Server
     client_connect(@sockets)
   end
 
+
   def client_ready(sockets)
     select(sockets, nil, nil, 2)
   end
   private :client_ready
+
 
   def client_connect(sockets)
     ready = select(sockets)
@@ -152,7 +170,7 @@ module Server
 
   def get_input(socket)
     @input = socket.gets       # Read input from the client
-    @input.chop!           # Trim client's input
+    @input.chop! unless @input.nil?  # Trim client's input
     # If no input, the client has disconnected
     if !@input
       Logger.log "Client on #{socket.peeraddr[2]} disconnected."
@@ -163,6 +181,7 @@ module Server
   end
   private :get_input
 
+
   def parse_input
     @input.strip!
     if quit = parse_quit()
@@ -172,12 +191,14 @@ module Server
     elsif remove = parse_remove()
     #hook must be before parse_fullpath_add
     elsif hook = parse_hook()
+    elsif hooklist = hook_list()
     elsif fullpath_add = parse_fullpath_add()
     elsif add = parse_add()
     else
       raise InputError "Invalid input #{@input}"
     end
   end
+
 
   def parse_quit
     if @input =~ /\Aquit|exit\Z/i      # If the client asks to quit
@@ -200,6 +221,7 @@ module Server
     end
     throw(:next)
   end
+
 
   def parse_shutdown
     if @input.downcase == "shutdown"
@@ -225,29 +247,61 @@ module Server
 
 
   def parse_hook
-    #if @input =~ /\Agithook add (\w+?(diiv)\w+) cmd: (.*)\Z/i
-    if %r{githook} =~ @input
-      @input.gsub!(/diiv/, '/')
-      #make match globals parse input
-      @input =~ /add ([^\/]+\/\w+) cmd: (.*)\Z/i
-      require "hooks/git_hooks"
-      @hook_cmds ||= {}
-      #repo is the key, cmds are arrays of values (allowing same repo to have
-      #numerous hooks methods)
-      if $1 != nil || $2 != nil
-        if @hook_cmds[$1]
-          @hook_cmds[$1] << $2
-        else
-          @hook_cmds[$1] = [$2]
+    if %r{githook add} =~ @input
+      githook_add()
+    else
+      return
+    end
+  end
+
+
+  def githook_add
+    @input.gsub!(/diiv/, '/')
+    #make match-$globals parse input
+    @input =~ /add ([^\/]+\/\w+) (dir: (\S*) )?cmd: (.*)\Z/i
+    require "hooks/git_hooks"
+    @hook_cmds ||= {}
+    #repo is the key, value is array of directory and commands. First element
+    #of array is the local directory for that remote repo, rest are commands
+    #related to hooks called onchange of the remote repo
+    if $1 != nil && $4 != nil
+      if @hook_cmds[$1]
+        @hook_cmds[$1] << $4
+      elsif $2 != nil
+        @hook_cmds[$1] = [$3, $4]
+      end
+      @socket.puts("Hook added")
+    else
+      @socket.puts("Format: 'githook add user/repo [dir: /my/dir/repo ] cmd: git pull origin'")
+    end
+    p @hook_cmds
+    throw(:next)
+  end
+  private :githook_add
+
+
+  def hook_list
+    if @input =~ %r{hook list}i
+      format_string = ""
+      unless @hook_cmds.nil? || @hook_cmds.empty?
+        @hook_cmds.each do |repo, ary|
+          remote = repo
+          cmds = ary[1..-1]
+          local = ary.first
+          format_string += <<-EOS
+remote: #{remote}
+  dir : #{local}
+  cmds: #{cmds.each {|cmd| print cmd + ' ' }} \n
+           EOS
         end
-        @socket.puts("Hook added")
-      else
-        @socket.puts("Format: 'githook add user/repo cmd: git pull origin'")
+        @socket.puts(format_string)
+        @socketspoke = true
       end
     else
       return
     end
-    p @hook_cmds
+    @socket.puts("No hooks") unless @socketspoke
+    @socketspoke = nil
     throw(:next)
   end
 
@@ -263,6 +317,7 @@ module Server
     return true
   end
 
+
   def parse_empty
     if @input == ''
       @socket.puts("")
@@ -272,6 +327,7 @@ module Server
     end
     return true
   end
+
 
   def parse_remove
     if %r{\Arm ([\w-](diiv)?[\w-]*)\Z} =~ @input
@@ -306,6 +362,7 @@ module Server
     return true
   end
 
+
   def parse_fullpath_add
     if @input.include?('diiv')
       #includes a '/', such as rails/rails, but in the adding to tracker context
@@ -316,10 +373,12 @@ module Server
     return true
   end
 
+
   #if the input is not the above special scenarios
   def parse_add
     @repo_name = @input
   end
+
 
   def get_github_doc
     begin
@@ -333,6 +392,7 @@ module Server
       throw(:next)
     end
   end
+
 
   def parse_doc
     #get commit msg
@@ -371,6 +431,7 @@ module Server
     end
   end
 
+
   def parse_msg
     #get commit msg
     @doc.xpath('//div[@class = "message"]/pre').each do |node|
@@ -378,11 +439,13 @@ module Server
     end
   end
 
+
   def parse_committer
     @doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
       return committer = node.text
     end
   end
+
 
   def parse_info
     @doc.xpath('//div[@class = "machine"]').each do |node|
@@ -394,8 +457,13 @@ end #of of Server module
 
 class Hubeye_Server
   include Server
+
+  def initialize(debug=false)
+    @debug = debug
+  end
+
 end
 
-server = Hubeye_Server.new
+server = Hubeye_Server.new(true)
 server.start(2000)
 
