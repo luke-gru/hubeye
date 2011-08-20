@@ -85,32 +85,50 @@ module Server
       while @remote_connection == false
         @hubeye_tracker.each do |repo|
           doc = Nokogiri::HTML(open("https://github.com/#{repo}/"))
+
+          #make variable not block-local
+          commit_msg = nil
+
           doc.xpath('//div[@class = "message"]/pre').each do |node|
-            @commit_compare = node.text
-            if @ary_commits_repos.include?(@commit_compare)
+            commit_msg = node.text
+            if @ary_commits_repos.include?(commit_msg)
               ONCEAROUND.times do
                 sleep 1
                 @remote_connection = client_ready(@sockets) ? true : false
                 break if @remote_connection
               end
             else
-              #There was a change a tracked repository.
+              #There was a change to a tracked repository.
+
+              #make variable not block-local
+              committer = nil
+
               doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
-                @committer = node.text
+                committer = node.text
               end
 
               #notify of change to repository
               #if they have a Desktop notification
               #library installed
+              #
+              change_msg = "Repo #{repo} has changed\nNew commit: #{commit_msg} => #{committer}"
               case DESKTOP_NOTIFICATION
-              when "libnotify" || "growl"
-                Autotest::GnomeNotify.notify("Hubeye", "Repo #{repo} has changed\nNew commit: #{@commit_compare} => #{@committer}", Autotest::GnomeNotify::CHANGE_ICON)
+              when "libnotify"
+                Autotest::GnomeNotify.notify("Hubeye", change_msg)
+                Logger.log_change(repo, commit, committer)
+              when "growl"
+                Autotest::Growl.growl("Hubeye", change_msg)
+                Logger.log_change(repo, commit, committer)
               when nil
-                #TODO: check to see if the pid of the server is associated with a
-                #terminal (or check the arguments for a -t). If found, log a
-                #change to the repo to the terminal with the time in the same
-                #format as the log page
+
+                if @daemonized
+                  Logger.log_change(repo, commit, committer)
+                else
+                  Logger.log_change(repo, commit, committer, :include_terminal => true)
+                end
+
               end
+
               @ary_commits_repos << repo
               @ary_commits_repos << @commit_compare
               #delete the repo and old commit that appear first in the array
