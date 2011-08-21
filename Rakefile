@@ -14,6 +14,10 @@ end
 task :makelog => :config_file do
   hublog_dir  =  ENV['HOME'] + "/hublog"
   mkdir(hublog_dir) unless File.exists?(hublog_dir)
+
+  hooks_dir = hublog_dir + "/hooks"
+  mkdir(hooks_dir) unless File.exists?(hooks_dir)
+
   hublog_file =  File.join(ENV['HOME'], "/hublog/hublog")
   touch hublog_file unless File.exists?(hublog_file)
 end

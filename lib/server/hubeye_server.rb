@@ -212,6 +212,8 @@ module Server
     #hook must be before parse_fullpath_add
     elsif hook = parse_hook()
     elsif hooklist = hook_list()
+    elsif savehooksrepos = save_hooks_or_repos()
+    elsif loadhooksrepos = load_hooks_or_repos()
     elsif fullpath_add = parse_fullpath_add()
     elsif add = parse_add()
     else
@@ -301,6 +303,54 @@ module Server
   private :githook_add
 
 
+  def save_hooks_or_repos
+    if @input =~ %r{\A\s*save hooks? as (.+)\Z}
+      if !@hook_cmds.nil? && !@hook_cmds.empty?
+        require "yaml" unless defined? YAML
+        File.open("#{ENV['HOME']}/hublog/hooks/#{$1}.yml", "w") do |f_out|
+          ::YAML.dump(@hook_cmds, f_out)
+        end
+        @socket.puts("Saved hook(s) as #{$1}")
+      else
+        @socket.puts("No hooks to save")
+      end
+      throw(:next)
+    elsif @input =~ %r{save repos as}
+
+    end
+    return
+  end
+
+
+  def load_hooks_or_repos
+    if @input =~ %r{\A\s*load (hooks?) (.+)\Z}
+      hookfile = "#{ENV['HOME']}/hublog/hooks/#{$2}.yml"
+
+      #establish non block-local scope
+      newhook = nil
+
+      if File.exists?(hookfile)
+        require "yaml" unless defined? YAML
+
+        File.open(hookfile) do |f|
+          newhook = ::YAML.load(f)
+        end
+        @hook_cmds ||= {}
+        @hook_cmds = newhook.merge(@hook_cmds)
+        @socket.puts("Loaded #{$1} #{$2}")
+
+      else
+        @socket.puts("No #{$1} file to load from")
+      end
+      throw(:next)
+
+    elsif @input =~ %r{\A\s*load repos? (.+)\Z}
+
+    end
+    return
+  end
+
+
   def hook_list
     if @input =~ %r{hook list}i
       format_string = ""
@@ -346,7 +396,6 @@ remote: #{remote}
     else
       return
     end
-    return true
   end
 
 
