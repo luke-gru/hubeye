@@ -155,34 +155,34 @@ module Server
 
   def client_connect(sockets)
     ready = select(sockets)
-    readable = ready[0]           # These sockets are readable
-    readable.each do |socket|         # Loop through readable sockets
+    readable = ready[0]            # These sockets are readable
+    readable.each do |socket|      # Loop through readable sockets
       if socket == @server         # If the server socket is ready
         client = @server.accept    # Accept a new client
-        @socket = client
-        sockets << client       # Add it to the set of sockets
+        @socket = client           # From here on in referred to as @socket
+        sockets << @socket         # Add it to the set of sockets
         # Tell the client what and where it has connected.
         if !@hubeye_tracker.empty?
-          client.puts "Hubeye running on #{Socket.gethostname}\nTracking:#{@hubeye_tracker.join(' ')}"
+          @socket.puts "Hubeye running on #{Socket.gethostname}\nTracking:#{@hubeye_tracker.join(' ')}"
         else
-          client.puts "Hubeye running on #{Socket.gethostname}"
+          @socket.puts "Hubeye running on #{Socket.gethostname}"
         end
 
         if !@daemonized
           puts "Client connected at #{::TimeHelper::NOW}"
         end
 
-        client.flush
+        @socket.flush
         # And log the fact that the client connected
         if @still_logging == true
           #if the client quit, do not wipe the log file
-          Logger.log "Accepted connection from #{client.peeraddr[2]} (#{::TimeHelper::NOW})"
+          Logger.log "Accepted connection from #{@socket.peeraddr[2]} (#{::TimeHelper::NOW})"
         else
           #wipe the log file and start anew
-          Logger.relog "Accepted connection from #{client.peeraddr[2]} (#{::TimeHelper::NOW})"
+          Logger.relog "Accepted connection from #{@socket.peeraddr[2]} (#{::TimeHelper::NOW})"
         end
-        Logger.log "local:  #{client.addr}"
-        Logger.log "peer :  #{client.peeraddr}"
+        Logger.log "local:  #{@socket.addr}"
+        Logger.log "peer :  #{@socket.peeraddr}"
       end
     end
   end
@@ -531,7 +531,7 @@ remote: #{remote}
 
 end #of of Server module
 
-class Hubeye_Server
+class HubeyeServer
   include Server
 
   def initialize(debug=false)
@@ -539,7 +539,4 @@ class Hubeye_Server
   end
 
 end
-
-server = Hubeye_Server.new(true)
-server.start(2000)
 

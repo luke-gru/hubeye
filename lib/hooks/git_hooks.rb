@@ -1,7 +1,7 @@
 module Hooks
   module Git
 
-    class Default
+    module Default
 
       def self.fetch(local_reponame, remotename, branchname)
         #first, start a process to cd to the local repo
