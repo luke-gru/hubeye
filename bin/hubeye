@@ -78,24 +78,25 @@ class Hubeye
     def start
       options = Options.parse(ARGV)
       port = options.port
+      daemonized = options.server_daemonized
       if options.server_wanted
         require File.join(Environment::LIBDIR, '/server/hubeye_server.rb')
-        options.server_daemonized ? start_in_background(port) : start_non_daemon(port)
+        options.server_daemonized ? start_in_background(port, :daemon => true) : start_non_daemon(port, :daemon => false)
       else
         require File.join(Environment::LIBDIR, '/client/hubeye_client.rb')
         start_client(port)
       end
     end
 
-    def start_in_background(port)
-      server = HubeyeServer.new(true)
+    def start_in_background(port, options={})
+      server = HubeyeServer.new(true) # debug: true
       Process.daemon()
-      server.start(port)
+      server.start(port, options)
     end
 
-    def start_non_daemon(port)
-      server = HubeyeServer.new(true) # debug: true
-      server.start(port)
+    def start_non_daemon(port, options={})
+      server = HubeyeServer.new(true)
+      server.start(port, options)
     end
 
     def start_client(port)

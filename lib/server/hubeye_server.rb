@@ -24,9 +24,9 @@ module Server
 
   class InputError < StandardError; end
 
-  def start(port)
+  def start(port, options={})
     listen(port)
-    setup_env()
+    setup_env(options)
     _loop do
       catch(:next) do
       not_connected() unless @remote_connection
@@ -46,7 +46,8 @@ module Server
   end
 
 
-  def setup_env
+  def setup_env(options={})
+    @daemonized = options[:daemon]
     @sockets = [@server]            # An array of sockets we'll monitor
     @ary_commits_repos = []
     @hubeye_tracker = []
@@ -62,17 +63,6 @@ module Server
       yield
     end
   end
-
-
-  def daemonized?
-    term = `ps ax | grep "hubeye start -t"`.scan(/.*\n/).first
-    if term =~ /pts/
-      return false
-    else
-      return true
-    end
-  end
-
 
   def not_connected
     #if no client is connected, but the commits array contains repos
