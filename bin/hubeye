@@ -8,14 +8,16 @@ require 'optparse'
 require 'ostruct'
 
 # vendor
-# will deprecate this soon, as Ruby >= 1.9 has Process::daemon
-begin
-  require 'daemons'
-rescue
-  require 'rubygems'
-  retry
-else
-  RuntimeError.new "The daemons gem is needed to run hubeye as a daemon"
+unless RUBY_VERSION >= 1.9
+  begin
+    require 'daemons'
+  rescue
+    require 'rubygems'
+    retry
+  else
+    RuntimeError.new "The daemons gem is needed to run hubeye as a daemon " +
+                     "on Ruby < 1.9"
+  end
 end
 
 class Hubeye
@@ -31,11 +33,13 @@ class Options
     options.client_wanted = (options.server_wanted ? false : true)
     options.server_daemonized = (options.server_wanted ? true : nil)
     options.port = 2000
+    options.host = 'localhost'
 
     opts_saved = OptionParser.new do |opts|
       opts.banner = "Usage: hubeye [options]"
       opts.separator ""
       opts.separator "Specific options:"
+      opts.separator "Note: The default port (for server and client) is 2000"
 
       opts.on("-s", "--server", "Start the server (default: daemonized process)") do
         options.server_daemonized = true
@@ -45,7 +49,11 @@ class Options
         options.server_daemonized = false
       end
 
-      opts.on("-p", "--port PORT", "Port that the server runs on. Defaults to '2000'") do |p|
+      opts.on("-o", "--host HOST", "Host that the client connects to. Default: 'localhost'") do |h|
+        options.host = h
+      end
+
+      opts.on("-p", "--port PORT", "Port that the server runs on / client connects to") do |p|
         options.port = p.to_i
       end
 
@@ -77,31 +85,32 @@ class Hubeye
 
     def start
       options = Options.parse(ARGV)
+      host = options.host
       port = options.port
       daemonized = options.server_daemonized
       if options.server_wanted
         require File.join(Environment::LIBDIR, '/server/hubeye_server.rb')
-        options.server_daemonized ? start_in_background(port, :daemon => true) : start_non_daemon(port, :daemon => false)
+        options.server_daemonized ? start_server(port, :daemon => true) : start_server(port, :daemon => false)
       else
         require File.join(Environment::LIBDIR, '/client/hubeye_client.rb')
-        start_client(port)
+        start_client(host, port)
       end
     end
 
-    def start_in_background(port, options={})
-      server = HubeyeServer.new(true) # debug: true
-      Process.daemon()
-      server.start(port, options)
+    def start_server(port, options={})
+      if options[:daemon]
+        server = HubeyeServer.new(true) # debug: true
+        Process.daemon(true) # don't change dir to '/'
+        server.start(port, options)
+      else
+        server = HubeyeServer.new(true)
+        server.start(port, options)
+      end
     end
 
-    def start_non_daemon(port, options={})
-      server = HubeyeServer.new(true)
-      server.start(port, options)
-    end
-
-    def start_client(port)
+    def start_client(host, port)
       client = HubeyeClient.new
-      client.start(HubeyeClient::HOST, port) # defaults to localhost:2000
+      client.start(host, port) # defaults to localhost:2000
     end
 
   end

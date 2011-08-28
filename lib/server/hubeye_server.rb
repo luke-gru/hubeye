@@ -54,7 +54,6 @@ module Server
     #username: changes if input includes a '/' for removing, adding tracked repos
     @username = 'luke-gru'
     @remote_connection = false
-    @daemonized = daemonized?
   end
 
 
