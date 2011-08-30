@@ -267,15 +267,17 @@ module Server
   end
 
 
+  ##
+  # @hook_cmds:
+  # repo is the key, value is array of directory and commands. First element
+  # of array is the local directory for that remote repo, rest are commands
+  # related to hooks called on change of the remote repo
   def githook_add
     @input.gsub!(/diiv/, '/')
     #make match-$globals parse input
     @input =~ /add ([^\/]+\/\w+) (dir: (\S*) )?cmd: (.*)\Z/i
-    require "hooks/git_hooks"
+    require "hooks/git_hooks" unless defined? Hooks::Git
     @hook_cmds ||= {}
-    #repo is the key, value is array of directory and commands. First element
-    #of array is the local directory for that remote repo, rest are commands
-    #related to hooks called on change of the remote repo
     if $1 != nil && $4 != nil
       if @hook_cmds[$1]
         @hook_cmds[$1] << $4
@@ -304,7 +306,7 @@ module Server
         @socket.puts("No hooks to save")
       end
       throw(:next)
-    elsif @input =~ %r{save repos as}
+    elsif @input =~ %r{save repos? as}
 
     end
     return
