@@ -109,7 +109,7 @@ module Server
 
               end
               #execute any hooks for that repository
-              unless @hook_cmds.empty? || @hook_cmds.nil?
+              unless @hook_cmds.nil? || @hook_cmds.empty?
                 if @hook_cmds[repo]
                   hook_cmds = @hook_cmds.dup
                   dir = hook_cmds[repo].shift
@@ -327,29 +327,51 @@ module Server
 
 
   def load_hooks_or_repos
-    if @input =~ %r{\A\s*load (hooks?) (.+)\Z}
+    if @input =~ %r{\A\s*load hook(s?) (.+)\Z}
       hookfile = "#{ENV['HOME']}/hublog/hooks/#{$2}.yml"
 
-      #establish non block-local scope
-      newhook = nil
+      # establish non block-local scope
+      newhooks = nil
 
       if File.exists?(hookfile)
-        require "yaml" unless defined? YAML
-
         File.open(hookfile) do |f|
-          newhook = ::YAML.load(f)
+          newhooks = ::YAML.load(f)
         end
         @hook_cmds ||= {}
-        @hook_cmds = newhook.merge(@hook_cmds)
+        @hook_cmds = newhooks.merge(@hook_cmds)
         @socket.puts("Loaded #{$1} #{$2}")
-
       else
         @socket.puts("No #{$1} file to load from")
       end
       throw(:next)
+    elsif @input =~ %r{\A\s*load repo(s)? (.+)\Z}
+      if File.exists? repo_file = "#{ENV['HOME']}/hublog/repos/#{$2}.yml"
+        newrepos = nil
+        File.open(repo_file) do |f|
+          newrepos = ::YAML.load(f)
+        end
 
-    elsif @input =~ %r{\A\s*load (repos?) (.+)\Z}
+        if !newrepos
+          @socket.puts "Unable to load #{$2}: empty file"
+          throw(:next)
+        end
+        # newrepos is an array of repos to be tracked
+        newrepos.each do |e|
+          # append the repo and a blank commit message to the repos and
+          # commit messages array
+          @ary_commits_repos << e << ""
+          # and append the repo to the hubeye_tracker array
+          @hubeye_tracker << e
+        end
+        @ary_commits_repos.uniq!
+        @hubeye_tracker.uniq!
 
+        @socket.puts "Loaded #{$2}.\nTracking:#{@hubeye_tracker.join(' ')}"
+      else
+        # no repo file with that name
+        @socket.puts("No file to load from")
+      end
+      throw(:next)
     end
     return
   end
