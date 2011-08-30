@@ -16,6 +16,7 @@ module Server
   require "notification/notification"
   require "log/logger"
   require "timehelper/timehelper"
+  require "hooks/executer"
 
   ONCEAROUND = 30
   #USERNAME: defined in ~/.hubeyerc
@@ -111,17 +112,12 @@ module Server
               #execute any hooks for that repository
               unless @hook_cmds.nil? || @hook_cmds.empty?
                 if @hook_cmds[repo]
-                  hook_cmds = @hook_cmds.dup
-                  dir = hook_cmds[repo].shift
-                  cmds_ary = []
-
-                  hook_cmds.each do |cmd|
-                    cmds_ary << cmd
-                  end
+                  hook_cmds = @hook_cmds[repo].dup
+                  dir = (hook_cmds.include?('/') ? hook_cmds.shift : nil)
 
                   #execute() takes [commands], {options} where
                   #options = :directory and :repo
-                  Hooks::Command.execute(cmds_ary, :directory => dir, :repo => repo)
+                  Hooks::Command.execute(hook_cmds, :directory => dir, :repo => repo)
                 end
               end
 
@@ -289,6 +285,8 @@ module Server
         @hook_cmds[$1] << $4
       elsif $2 != nil
         @hook_cmds[$1] = [$3, $4]
+      else
+        @hook_cmds[$1] = [$4]
       end
       @socket.puts("Hook added")
     else
@@ -383,8 +381,13 @@ module Server
       unless @hook_cmds.nil? || @hook_cmds.empty?
         @hook_cmds.each do |repo, ary|
           remote = repo
-          cmds = ary[1..-1]
-          local = ary.first
+          if ary.first.include? '/'
+            local = ary.first
+            cmds  = ary[1..-1]
+          else
+            cmds = ary
+            local = "N/A"
+          end
           format_string += <<-EOS
 remote: #{remote}
   dir : #{local}

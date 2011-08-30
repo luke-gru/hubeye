@@ -7,12 +7,16 @@ module Hooks
       #(that's it for now, will add more functionality later)
       def self.execute(commands=[], options={})
         opts = {:directory => nil, :repo => nil}.merge(options)
-        dir  = opts[:dir]
+        dir  = opts[:directory]
         repo = opts[:repo]
         begin
 
         commands.each do |cmd|
-          Dir.chdir(File.expand_path(dir)) do
+          if dir
+            Dir.chdir(File.expand_path(dir)) do
+              ::Kernel.system cmd
+            end
+          else
             ::Kernel.system cmd
           end
         end
