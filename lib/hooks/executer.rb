@@ -1,7 +1,7 @@
 module Hooks
   class Command
 
-    class NoCommandError < ArgumentError; end
+    class NoHookError < ArgumentError; end
 
       #options include the directory to execute the command
       #(that's it for now, will add more functionality later)
@@ -11,14 +11,14 @@ module Hooks
         repo = opts[:repo]
         begin
 
-        commands.each do |com|
+        commands.each do |cmd|
           Dir.chdir(File.expand_path(dir)) do
-            ::Kernel.system com
+            ::Kernel.system cmd
           end
         end
 
         rescue ArgumentError
-          raise NoCommandError.new "There aren't any commands for the repository #{repo}"
+          raise NoHookError.new "There aren't any hook commands for the repository #{repo}"
         end
       end
 

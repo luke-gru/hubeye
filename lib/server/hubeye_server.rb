@@ -27,7 +27,7 @@ module Server
   def start(port, options={})
     listen(port)
     setup_env(options)
-    _loop do
+    loop do
       catch(:next) do
       not_connected() unless @remote_connection
       get_input(@socket)
@@ -56,12 +56,6 @@ module Server
     @remote_connection = false
   end
 
-
-  def _loop
-    while true
-      yield
-    end
-  end
 
   def not_connected
     #if no client is connected, but the commits array contains repos
@@ -118,6 +112,23 @@ module Server
                 end
 
               end
+              #execute any hooks for that repository
+              unless @hook_cmds.empty? || @hook_cmds.nil?
+                if @hook_cmds[repo]
+                  hook_cmds = @hook_cmds.dup
+                  dir = hook_cmds[repo].shift
+                  cmds_ary = []
+
+                  hook_cmds.each do |cmd|
+                    cmds_ary << cmd
+                  end
+
+                  #execute() takes [commands], {options} where
+                  #options = :directory and :repo
+                  Hooks::Command.execute(cmds_ary, :directory => dir, :repo => repo)
+                end
+              end
+
 
               @ary_commits_repos << repo
               @ary_commits_repos << commit_msg
@@ -150,7 +161,7 @@ module Server
         client = @server.accept    # Accept a new client
         @socket = client           # From here on in referred to as @socket
         sockets << @socket         # Add it to the set of sockets
-        # Tell the client what and where it has connected.
+        # Inform the client of connection
         if !@hubeye_tracker.empty?
           @socket.puts "Hubeye running on #{Socket.gethostname}\nTracking:#{@hubeye_tracker.join(' ')}"
         else
