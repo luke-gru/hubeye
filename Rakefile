@@ -3,12 +3,8 @@ task :install => :chmod do
 end
 
 task :chmod => :makelog do
-  daemon_file =  File.join(File.dirname(__FILE__), "hubeye")
-  server_file =  File.join(File.dirname(__FILE__), "hubeye_server.rb")
-  client_file =  File.join(File.dirname(__FILE__), "hubeye_client.rb")
-  [daemon_file, server_file, client_file].each do |file|
-    chmod 0777, file unless File.executable?(file)
-  end
+  binfile = File.join(File.dirname(__FILE__), "/bin/hubeye")
+  chmod 0777, binfile unless File.executable?(binfile)
 end
 
 task :makelog => :config_file do
@@ -17,6 +13,9 @@ task :makelog => :config_file do
 
   hooks_dir = hublog_dir + "/hooks"
   mkdir(hooks_dir) unless File.exists?(hooks_dir)
+
+  repos_dir = hublog_dir + "/repos"
+  mkdir(repos_dir) unless File.exists?(repos_dir)
 
   hublog_file =  File.join(ENV['HOME'], "/hublog/hublog")
   touch hublog_file unless File.exists?(hublog_file)

@@ -1,6 +1,7 @@
 module Server
   require 'socket'
   require 'open-uri'
+  require 'yaml'
 
   begin
     require 'nokogiri'
@@ -60,11 +61,6 @@ module Server
   def not_connected
     #if no client is connected, but the commits array contains repos
     if @sockets.size == 1 and @ary_commits_repos.empty? == false
-      @ary_commits_repos.each do |e|
-        #put these repos in the array hubeye_tracker
-        @hubeye_tracker << e if @ary_commits_repos.index(e).even?
-        @hubeye_tracker.uniq!
-      end
 
       while @remote_connection == false
         @hubeye_tracker.each do |repo|
@@ -203,17 +199,17 @@ module Server
 
 
   def parse_input
-    @input.strip!
+    @input.strip!; @input.downcase!
     if quit = parse_quit()
     elsif shut = parse_shutdown()
+    elsif savehooksrepos = save_hooks_or_repos()
+    elsif loadhooksrepos = load_hooks_or_repos()
+    elsif hook = parse_hook()
+    elsif hooklist = hook_list()
     elsif pwd = parse_pwd()
     elsif empty = parse_empty()
     elsif remove = parse_remove()
     #hook must be before parse_fullpath_add
-    elsif hook = parse_hook()
-    elsif hooklist = hook_list()
-    elsif savehooksrepos = save_hooks_or_repos()
-    elsif loadhooksrepos = load_hooks_or_repos()
     elsif fullpath_add = parse_fullpath_add()
     elsif add = parse_add()
     else
@@ -231,7 +227,6 @@ module Server
         Logger.log "Tracking: "
         @ary_commits_repos.each do |repo|
           Logger.log repo if @ary_commits_repos.index(repo).even?
-          @hubeye_tracker.uniq!
         end
       end
       Logger.log "" # to look pretty when multiple connections per loop
@@ -247,7 +242,7 @@ module Server
 
 
   def parse_shutdown
-    if @input.downcase == "shutdown"
+    if @input == "shutdown"
       #local
       Logger.log "Closing connection to #{@socket.peeraddr[2]}"
       Logger.log "Shutting down... (#{::TimeHelper::NOW})"
@@ -299,28 +294,35 @@ module Server
     else
       @socket.puts("Format: 'githook add user/repo [dir: /my/dir/repo ] cmd: git pull origin'")
     end
-    p @hook_cmds
     throw(:next)
   end
   private :githook_add
 
 
   def save_hooks_or_repos
-    if @input =~ %r{\A\s*save hooks? as (.+)\Z}
+    if @input =~ %r{\A\s*save hook(s?) as (.+)\Z}
       if !@hook_cmds.nil? && !@hook_cmds.empty?
-        require "yaml" unless defined? YAML
-        File.open("#{ENV['HOME']}/hublog/hooks/#{$1}.yml", "w") do |f_out|
+        File.open("#{ENV['HOME']}/hublog/hooks/#{$2}.yml", "w") do |f_out|
           ::YAML.dump(@hook_cmds, f_out)
         end
-        @socket.puts("Saved hook(s) as #{$1}")
+        @socket.puts("Saved hook#{$1} as #{$2}")
       else
-        @socket.puts("No hooks to save")
+        @socket.puts("No hook#{$1} to save")
       end
       throw(:next)
-    elsif @input =~ %r{save repos? as}
-
+    elsif @input =~ %r{\A\s*save repo(s?) as (.+)\Z}
+      if !@hubeye_tracker.empty?
+        File.open("#{ENV['HOME']}/hublog/repos/#{$2}.yml", "w") do |f_out|
+          ::YAML.dump(@hubeye_tracker, f_out)
+        end
+        @socket.puts("Saved repo#{$1} as #{$2}")
+      else
+        @socket.puts("No remote repos are being tracked")
+      end
+      throw(:next)
+    else
+      return
     end
-    return
   end
 
 
@@ -346,7 +348,7 @@ module Server
       end
       throw(:next)
 
-    elsif @input =~ %r{\A\s*load repos? (.+)\Z}
+    elsif @input =~ %r{\A\s*load (repos?) (.+)\Z}
 
     end
     return
@@ -472,8 +474,9 @@ remote: #{remote}
     @committer = parse_committer()
 
     #new repo to track
-    if !@ary_commits_repos.include?("#{@username}/#{@repo_name}".downcase.strip)
+    if !@ary_commits_repos.include?("#{@username}/#{@repo_name}")
       @ary_commits_repos << "#{@username}/#{@repo_name}"
+      @hubeye_tracker << "#{@username}/#{@repo_name}"
       @ary_commits_repos << @commit_msg
       #get commit info
       @info = parse_info()
@@ -505,7 +508,7 @@ remote: #{remote}
 
     else
       #no change
-      @socket.puts("Repository #{@repo_name.downcase.strip} has not changed")
+      @socket.puts("Repository #{@repo_name} has not changed")
     end
   end
 
@@ -527,7 +530,7 @@ remote: #{remote}
 
   def parse_info
     @doc.xpath('//div[@class = "machine"]').each do |node|
-      return info =  node.text.strip!.gsub(/\n/, '').gsub(/tree/, "\ntree").gsub(/parent.*?(\w)/, "\nparent  \\1")
+      return info =  node.text.gsub(/\n/, '').gsub(/tree/, "\ntree").gsub(/parent.*?(\w)/, "\nparent  \\1").strip!
     end
   end
 

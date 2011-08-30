@@ -39,8 +39,8 @@ class HubeyeClient
       sleep(0.5)            # Wait half a second
       msg = @s.readpartial(4096)     # Read whatever is ready
       STDOUT.puts msg.chop      # And display it
+    # If nothing was ready to read, just ignore the exception.
     rescue SystemCallError
-      # If nothing was ready to read, just ignore the exception.
     rescue NoMethodError
       STDOUT.puts "The server's not running!"
     end
@@ -63,8 +63,14 @@ class HubeyeClient
         # Read the server's response and print out.
         # The server may send more than one line, so use readpartial
         # to read whatever it sends (as long as it all arrives in one chunk).
-        sleep(0.5)
-        response = @s.readpartial(4096)
+
+        sleep 0.5
+        begin
+          response = @s.readpartial(4096)
+        rescue EOFError
+          response = "Bye!"
+        end
+
         if response.chop.strip == "Bye!"
           puts(response.chop)
           @s.close

@@ -1,7 +1,8 @@
 #!/usr/bin/env ruby
 
-# require environment file
-require File.join(File.dirname(__FILE__), "../lib/environment")
+# require environment file regardless of one's present working directory
+# (not pretty!)
+require File.join(File.expand_path(File.dirname(__FILE__)), "lib/environment").gsub(/bin\//, '')
 
 # standard lib
 require 'optparse'
@@ -104,6 +105,8 @@ class Hubeye
 
 
     def port_open?(port)
+      # this is the solution until multi-threading is implemented
+      # on the TCP server
       listening_tcps = `netstat -l --tcp --numeric`
       if /#{port}/ =~ listening_tcps
         return false
@@ -113,14 +116,11 @@ class Hubeye
 
 
     def start_server(port, options={})
+      server = HubeyeServer.new(true) # debug: true
       if options[:daemon]
-        server = HubeyeServer.new(true) # debug: true
         Process.daemon(true) # don't change dir to '/'
-        server.start(port, options)
-      else
-        server = HubeyeServer.new(true)
-        server.start(port, options)
       end
+      server.start(port, options)
     end
 
     # client connection defaults to localhost:2000
