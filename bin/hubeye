@@ -21,7 +21,7 @@ unless RUBY_VERSION >= '1.9'
 end
 
 class Hubeye
-  VERSION = ['0','0','1']
+  VERSION = [0,0,1]
 end
 
 class Options
@@ -30,8 +30,8 @@ class Options
     # defaults
     options = OpenStruct.new
     options.server_wanted = true
-    options.client_wanted = (options.server_wanted ? false : true)
-    options.server_daemonized = (options.server_wanted ? true : nil)
+    options.client_wanted = false
+    options.server_daemonized = true
     options.port = 2000
     options.host = 'localhost'
 
@@ -42,7 +42,8 @@ class Options
       opts.separator "Note: The default port (for server and client) is 2000"
 
       opts.on("-s", "--server", "Start the server (default: daemonized process)") do
-        options.server_daemonized = true
+        options.client_wanted = false
+        options.server_wanted = true
       end
 
       opts.on("-t", "--top", "Run server as non-daemonized (output to term)") do
@@ -89,6 +90,10 @@ class Hubeye
       port = options.port
       daemonized = options.server_daemonized
       if options.server_wanted
+        unless port_open?(port)
+          puts "Other instances are running"
+          exit 1
+        end
         require File.join(Environment::LIBDIR, '/server/hubeye_server.rb')
         options.server_daemonized ? start_server(port, :daemon => true) : start_server(port, :daemon => false)
       else
@@ -96,6 +101,16 @@ class Hubeye
         start_client(host, port)
       end
     end
+
+
+    def port_open?(port)
+      listening_tcps = `netstat -l --tcp --numeric`
+      if /#{port}/ =~ listening_tcps
+        return false
+      end
+      true
+    end
+
 
     def start_server(port, options={})
       if options[:daemon]
@@ -108,9 +123,10 @@ class Hubeye
       end
     end
 
+    # client connection defaults to localhost:2000
     def start_client(host, port)
       client = HubeyeClient.new
-      client.start(host, port) # defaults to localhost:2000
+      client.start(host, port)
     end
 
   end
@@ -118,5 +134,3 @@ end
 
 Hubeye.start
 
-# run server as daemon
-#Daemons.run(File.join(Environment::LIBDIR, '/server/hubeye_server.rb'))
