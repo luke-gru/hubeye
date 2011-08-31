@@ -1,8 +1,10 @@
 module Server
+  # standard lib.
   require 'socket'
   require 'open-uri'
   require 'yaml'
 
+  # vendor
   begin
     require 'nokogiri'
   rescue LoadError
@@ -13,15 +15,21 @@ module Server
     end
   end
 
+  # hubeye
   require "notification/notification"
   require "log/logger"
   require "timehelper/timehelper"
+  require "hooks/git_hooks"
   require "hooks/executer"
 
+  # ONCEAROUND: 30 (seconds) is the default amount of time for looking
+  # for changes in every single repository. If tracking lots of repos,
+  # it might be a good idea to increase the value, or hubeye will cry
+  # due to overwork, fatigue and general anhedonia.
   ONCEAROUND = 30
-  #USERNAME: defined in ~/.hubeyerc
+  # USERNAME: defined in ~/.hubeyerc
   USERNAME = 'luke-gru'
-  #find Desktop notification system
+  # find Desktop notification system
   DESKTOP_NOTIFICATION = Notification::Finder.find_notify
 
   class InputError < StandardError; end
@@ -35,39 +43,40 @@ module Server
       get_input(@socket)
       puts @input if @debug
       parse_input()
-      get_github_doc()
+      get_github_doc("/#{@username}/#{@repo_name}")
       parse_doc()
       @username = USERNAME
       end
     end
   end
 
-
+  # Listen on port (2000 is the default)
   def listen(port)
-    @server = TCPServer.open(port)       # Listen on port 2000
+    @server = TCPServer.open(port)
   end
 
 
   def setup_env(options={})
     @daemonized = options[:daemon]
-    @sockets = [@server]            # An array of sockets we'll monitor
+    @sockets = [@server]  # An array of sockets we'll monitor
     @ary_commits_repos = []
     @hubeye_tracker = []
-    #username: changes if input includes a '/' for removing, adding tracked repos
+    # @username changes if input includes a '/' when removing, adding tracked
+    # repos.
     @username = 'luke-gru'
     @remote_connection = false
   end
 
 
   def not_connected
-    #if no client is connected, but the commits array contains repos
+    # if no client is connected, but the commits array contains repos
     if @sockets.size == 1 and @ary_commits_repos.empty? == false
 
       while @remote_connection == false
         @hubeye_tracker.each do |repo|
           doc = Nokogiri::HTML(open("https://github.com/#{repo}/"))
 
-          #make variable not block-local
+          # make variable not block-local
           commit_msg = nil
 
           doc.xpath('//div[@class = "message"]/pre').each do |node|
@@ -79,19 +88,18 @@ module Server
                 break if @remote_connection
               end
             else
-              #There was a change to a tracked repository.
+              # There was a change to a tracked repository.
 
-              #make variable not block-local
+              # make variable not block-local
               committer = nil
 
               doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
                 committer = node.text
               end
 
-              #notify of change to repository
-              #if they have a Desktop notification
-              #library installed
-              #
+              # notify of change to repository
+              # if they have a Desktop notification
+              # library installed
               change_msg = "Repo #{repo} has changed\nNew commit: #{commit_msg} => #{committer}"
               case DESKTOP_NOTIFICATION
               when "libnotify"
@@ -109,31 +117,30 @@ module Server
                 end
 
               end
-              #execute any hooks for that repository
+              # execute any hooks for that repository
               unless @hook_cmds.nil? || @hook_cmds.empty?
                 if @hook_cmds[repo]
                   hook_cmds = @hook_cmds[repo].dup
                   dir = (hook_cmds.include?('/') ? hook_cmds.shift : nil)
 
-                  #execute() takes [commands], {options} where
-                  #options = :directory and :repo
+                  # execute() takes [commands], {options} where
+                  # options = :directory and :repo
                   Hooks::Command.execute(hook_cmds, :directory => dir, :repo => repo)
                 end
               end
 
-
               @ary_commits_repos << repo
               @ary_commits_repos << commit_msg
-              #delete the repo and old commit that appear first in the array
+              # delete the repo and old commit that appear first in the array
               index_old_HEAD = @ary_commits_repos.index(repo)
               @ary_commits_repos.delete_at(index_old_HEAD)
-              #and again to get rid of the commit message
+              # and again to get rid of the commit message
               @ary_commits_repos.delete_at(index_old_HEAD)
             end
           end
         end
         redo unless @remote_connection
-      end #end of (while remote_connection == false)
+      end # end of (while remote_connection == false)
     end
     client_connect(@sockets)
   end
@@ -167,10 +174,10 @@ module Server
         @socket.flush
         # And log the fact that the client connected
         if @still_logging == true
-          #if the client quit, do not wipe the log file
+          # if the client quit, do not wipe the log file
           Logger.log "Accepted connection from #{@socket.peeraddr[2]} (#{::TimeHelper::NOW})"
         else
-          #wipe the log file and start anew
+          # wipe the log file and start anew
           Logger.relog "Accepted connection from #{@socket.peeraddr[2]} (#{::TimeHelper::NOW})"
         end
         Logger.log "local:  #{@socket.addr}"
@@ -181,14 +188,14 @@ module Server
 
 
   def get_input(socket)
-    @input = socket.gets       # Read input from the client
+    @input = socket.gets  # Read input from the client
     @input.chop! unless @input.nil?  # Trim client's input
     # If no input, the client has disconnected
     if !@input
       Logger.log "Client on #{socket.peeraddr[2]} disconnected."
       @sockets.delete(socket)  # Stop monitoring this socket
-      socket.close      # Close it
-      throw(:next)      # And go on to the next
+      socket.close  # Close it
+      throw(:next)  # And go on to the next
     end
   end
   private :get_input
@@ -196,18 +203,19 @@ module Server
 
   def parse_input
     @input.strip!; @input.downcase!
-    if quit = parse_quit()
-    elsif shut = parse_shutdown()
-    elsif savehooksrepos = save_hooks_or_repos()
-    elsif loadhooksrepos = load_hooks_or_repos()
-    elsif hook = parse_hook()
-    elsif hooklist = hook_list()
-    elsif pwd = parse_pwd()
-    elsif empty = parse_empty()
-    elsif remove = parse_remove()
-    #hook must be before parse_fullpath_add
-    elsif fullpath_add = parse_fullpath_add()
-    elsif add = parse_add()
+    if parse_quit()
+    elsif parse_shutdown()
+    elsif save_hooks_or_repos()
+    elsif load_hooks_or_repos()
+    # parse_hook must be before parse_fullpath_add for the moment
+    elsif parse_hook()
+    elsif hook_list()
+    elsif tracking_list()
+    elsif parse_pwd()
+    elsif parse_empty()
+    elsif parse_remove()
+    elsif parse_fullpath_add()
+    elsif parse_add()
     else
       raise InputError "Invalid input #{@input}"
     end
@@ -215,8 +223,8 @@ module Server
 
 
   def parse_quit
-    if @input =~ /\Aquit|exit\Z/i      # If the client asks to quit
-      @socket.puts("Bye!")   # Say goodbye
+    if @input =~ /\Aquit|exit\Z/  # If the client asks to quit
+      @socket.puts("Bye!")  # Say goodbye
       Logger.log "Closing connection to #{@socket.peeraddr[2]}"
       @remote_connection = false
       if !@ary_commits_repos.empty?
@@ -227,8 +235,8 @@ module Server
       end
       Logger.log "" # to look pretty when multiple connections per loop
       @sockets.delete(@socket)  # Stop monitoring the socket
-      @socket.close      # Terminate the session
-      #still_logging makes the server not wipe the log file
+      @socket.close  # Terminate the session
+      # still_logging makes the server not wipe the log file
       @still_logging = true
     else
       return
@@ -239,12 +247,12 @@ module Server
 
   def parse_shutdown
     if @input == "shutdown"
-      #local
+      # local
       Logger.log "Closing connection to #{@socket.peeraddr[2]}"
       Logger.log "Shutting down... (#{::TimeHelper::NOW})"
       Logger.log ""
       Logger.log ""
-      #peer
+      # peer
       @socket.puts("Shutting down server")
     else
       return
@@ -273,12 +281,12 @@ module Server
   # @hook_cmds:
   # repo is the key, value is array of directory and commands. First element
   # of array is the local directory for that remote repo, rest are commands
-  # related to hooks called on change of the remote repo
+  # related to hooks called on change of commit message (with plans to change
+  # that to commit SHA reference) of the remote repo
   def githook_add
     @input.gsub!(/diiv/, '/')
-    #make match-$globals parse input
-    @input =~ /add ([^\/]+\/\w+) (dir: (\S*) )?cmd: (.*)\Z/i
-    require "hooks/git_hooks" unless defined? Hooks::Git
+    # make match-$globals parse input
+    @input =~ /add ([^\/]+\/\w+) (dir: (\S*) )?cmd: (.*)\Z/
     @hook_cmds ||= {}
     if $1 != nil && $4 != nil
       if @hook_cmds[$1]
@@ -355,16 +363,20 @@ module Server
         end
         # newrepos is an array of repos to be tracked
         newrepos.each do |e|
-          # append the repo and a blank commit message to the repos and
-          # commit messages array
-          @ary_commits_repos << e << ""
+          # append the repo and the newest commit message to the repos and
+          # commit messages array, then inform the client of the newest
+          # commit message
+          commit_msg = get_commit_msg(e)
+          # if the commit_msg is non-false, don't do anything, otherwise 'next'
+          commit_msg ? nil : next
+          @ary_commits_repos << e << commit_msg
           # and append the repo to the hubeye_tracker array
           @hubeye_tracker << e
         end
         @ary_commits_repos.uniq!
         @hubeye_tracker.uniq!
 
-        @socket.puts "Loaded #{$2}.\nTracking:#{@hubeye_tracker.join(' ')}"
+        @socket.puts "Loaded #{$2}.\nTracking:\n#{show_repos_pretty()}"
       else
         # no repo file with that name
         @socket.puts("No file to load from")
@@ -375,9 +387,34 @@ module Server
   end
 
 
+  # helper method to get commit message for a
+  # single repo
+  def get_commit_msg(remote_repo)
+    begin
+      @doc = Nokogiri::HTML(open("https://github.com#{'/' + remote_repo}"))
+    rescue
+      return nil
+    end
+    # returns the commit message
+    commit_msg = parse_msg(@doc)
+  end
+
+
+  def show_repos_pretty
+    pretty_repos = ""
+    @ary_commits_repos.each do |e|
+      if @ary_commits_repos.index(e).even?
+        pretty_repos += e + "\n"
+      else
+        pretty_repos += "  " + e + "\n"
+      end
+    end
+    pretty_repos
+  end
+
+
   def hook_list
-    if @input =~ %r{hook list}i
-      format_string = ""
+    if @input =~ %r{hook list}
       unless @hook_cmds.nil? || @hook_cmds.empty?
         @hook_cmds.each do |repo, ary|
           remote = repo
@@ -388,7 +425,7 @@ module Server
             cmds = ary
             local = "N/A"
           end
-          format_string += <<-EOS
+          format_string = <<-EOS
 remote: #{remote}
   dir : #{local}
   cmds: #{cmds.each {|cmd| print cmd + ' ' }} \n
@@ -406,9 +443,28 @@ remote: #{remote}
   end
 
 
+  # show the client what repos (with commit messages)
+  # they're tracking
+  def tracking_list
+    if @input =~ /\Atracking\s*\Z/
+      list = show_repos_pretty
+      @socket.puts(list)
+      throw(:next)
+    else
+      return
+    end
+  end
+
+
+  # This means the user pressed '.' in the client,
+  # wanting to track the pwd repo. The period is replaced
+  # by 'pwd' in the client application and sent to @input because of
+  # problems with the period getting stripped in TCP transit. The name
+  # of the client's present working directory comes right after the 'pwd'.
+  # Typing '.' in the client only works (ie: begins tracking the remote repo)
+  # if the root directory of the git repository has the same name as one of
+  # the user's github repositories.
   def parse_pwd
-    #this means the user pressed '.' in the client,
-    #wanting to track the pwd repo
     if @input.match(/^pwd/)
       @repo_name = @input[3..-1]
     else
@@ -428,6 +484,13 @@ remote: #{remote}
   end
 
 
+  # Like the method parse_pwd, in which the client application replaces
+  # the '.' with 'pwd' and sends that to this server instead, parse_remove
+  # does pretty much the same thing with '/'. This is because of the slash
+  # getting stripped in TCP transit. Here, the slash is replaced with 'diiv',
+  # as this is unlikely to be included anywhere in a real username/repository
+  # combination (or is it... duh duh DUUUUHH)
+  # p.s. no it isn't
   def parse_remove
     if %r{\Arm ([\w-](diiv)?[\w-]*)\Z} =~ @input
       if $1.include?("diiv")
@@ -439,7 +502,7 @@ remote: #{remote}
       begin
         index_found = @ary_commits_repos.index("#{@username}/#{@repo_name}")
         if index_found
-          #consecutive indices in the array
+          # consecutive indices in the array
           for i in 1..2
             @ary_commits_repos.delete_at(index_found)
           end
@@ -463,7 +526,7 @@ remote: #{remote}
 
   def parse_fullpath_add
     if @input.include?('diiv')
-      #includes a '/', such as rails/rails, but in the adding to tracker context
+      # includes a '/', such as rails/rails, but in the adding to tracker context
       @username, @repo_name = @input.split('diiv')
     else
       return
@@ -472,16 +535,16 @@ remote: #{remote}
   end
 
 
-  #if the input is not the above special scenarios
+  # if the input is not the above special scenarios
   def parse_add
     @repo_name = @input
   end
 
 
-  def get_github_doc
+  def get_github_doc(full_repo_path)
     begin
-      #if adding a repo with another username
-      @doc = Nokogiri::HTML(open("https://github.com/#{@username}/#{@repo_name}"))
+      # if adding a repo with another username
+      @doc = Nokogiri::HTML(open("https://github.com#{full_repo_path}"))
     rescue OpenURI::HTTPError
       @socket.puts("Not a Github repository!")
       throw(:next)
@@ -493,32 +556,33 @@ remote: #{remote}
 
 
   def parse_doc
-    #get commit msg
-    @commit_msg = parse_msg()
-    #get committer
+    # get commit msg
+    @commit_msg = parse_msg(@doc)
+    # get committer
     @committer = parse_committer()
 
-    #new repo to track
-    if !@ary_commits_repos.include?("#{@username}/#{@repo_name}")
-      @ary_commits_repos << "#{@username}/#{@repo_name}"
-      @hubeye_tracker << "#{@username}/#{@repo_name}"
+    # new repo to track
+    full_repo_name = "#{@username}/#{@repo_name}"
+    if !@ary_commits_repos.include?(full_repo_name)
+      @ary_commits_repos << full_repo_name
+      @hubeye_tracker << full_repo_name
       @ary_commits_repos << @commit_msg
-      #get commit info
+      # get commit info
       @info = parse_info()
       @msg =  "#{@commit_msg} => #{@committer}".gsub(/\(author\)/, '')
-      #log the fact that the user added a repo to be tracked
+      # log the fact that the user added a repo to be tracked
       Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{::TimeHelper::NOW})")
-      #show the user, via the client, the info and commit msg for the commit
+      # show the user, via the client, the info and commit msg for the commit
       @socket.puts("#{@info}\n#{@msg}")
 
-    #new commit to tracked repo
+    # new commit to tracked repo
     elsif !@ary_commits_repos.include?(@commit_msg)
       begin
         index_of_msg = @ary_commits_repos.index(@username + "/" + @repo_name) + 1
         @ary_commits_repos.delete_at(index_of_msg)
         @ary_commits_repos.insert(index_of_msg - 1, @commit_msg)
 
-        #log to the logfile and tell the client
+        # log to the logfile and tell the client
         if @daemonized
           Logger.log_change(@repo_name, @commit_msg, @committer,
                             :include_socket => true)
@@ -526,21 +590,19 @@ remote: #{remote}
           Logger.log_change(@repo_name, @commit_msg, @committer,
                             :include_socket => true, :include_terminal => true)
         end
-
       rescue
         @socket.puts($!)
       end
-
     else
-      #no change
+      # no change to the tracked repo
       @socket.puts("Repository #{@repo_name} has not changed")
     end
   end
 
 
-  def parse_msg
-    #get commit msg
-    @doc.xpath('//div[@class = "message"]/pre').each do |node|
+  def parse_msg(html_doc)
+    # get commit msg
+    html_doc.xpath('//div[@class = "message"]/pre').each do |node|
       return commit_msg = node.text
     end
   end
@@ -559,7 +621,7 @@ remote: #{remote}
     end
   end
 
-end #of of Server module
+end # of Server module
 
 class HubeyeServer
   include Server
