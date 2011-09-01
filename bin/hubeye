@@ -1,8 +1,8 @@
 #!/usr/bin/env ruby
 
-# require environment file regardless of one's present working directory
-# (not pretty!)
-require File.join(File.expand_path(File.dirname(__FILE__)), "lib/environment").gsub(/bin\//, '')
+# require environment and VERSION files
+require File.join(File.expand_path(File.dirname(__FILE__) + "/../"), "lib/environment")
+require File.expand_path(File.dirname(__FILE__) + "/../VERSION")
 
 # standard lib
 require 'optparse'
@@ -19,10 +19,6 @@ unless RUBY_VERSION >= '1.9'
     RuntimeError.new "The daemons gem is needed to run hubeye as a daemon " +
                      "on Ruby < 1.9"
   end
-end
-
-class Hubeye
-  VERSION = [0,0,1]
 end
 
 class Options
