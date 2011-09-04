@@ -78,11 +78,27 @@ module Server
   def setup_env(options={})
     @daemonized = options[:daemon]
     @sockets = [@server]  # An array of sockets we'll monitor
-    @ary_commits_repos = []
-    @hubeye_tracker = []
+    if !TRACK_DEFAULT.empty?
+      # default tracked arrays (hubeyerc configurations)
+      @hubeye_tracker = TRACK_DEFAULT
+      track_default = TRACK_DEFAULT.dup
+
+      track_default.each do |repo|
+        commit_msg = get_commit_msg(repo)
+        # next unless commit_msg is non-false
+        commit_msg ? nil : next
+        ary_index = track_default.index(repo)
+        track_default.insert(ary_index + 1, commit_msg)
+      end
+
+      @ary_commits_repos = track_default
+    else
+      @ary_commits_repos = []
+      @hubeye_tracker = []
+    end
     # @username changes if input includes a '/' when removing, adding tracked
     # repos.
-    @username = 'luke-gru'
+    @username = USERNAME
     @remote_connection = false
   end
 
