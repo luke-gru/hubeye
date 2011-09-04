@@ -25,32 +25,47 @@ module Server
   include Helpers::Time
 
   CONFIG_FILE = ENV['HOME'] + "/.hubeye/hubeyerc"
+  CONFIG = {}
   # find Desktop notification system
-  DESKTOP_NOTIFICATION = Notification::Finder.find_notify
 
-  # Config options: defined in ~/.hubeye/hubeyerc
+  # CONFIG options: defined in ~/.hubeye/hubeyerc
   #
   # Option overview:
   #
-  # ONCEAROUND: 30 (seconds) is the default amount of time for looking
+  # CONFIG[:oncearound]: 30 (seconds) is the default amount of time for looking
   # for changes in every single repository. If tracking lots of repos,
   # it might be a good idea to increase the value, or hubeye will cry
   # due to overwork, fatigue and general anhedonia.
   #
   # hubeyerc format: oncearound: 1000
   #
-  # USERNAME: username used when not specified:
+  # CONFIG[:username] is the username used when not specified:
   # when set to 'hansolo'
   # >rails
-  # would track https//www.github.com/hansolo/rails
+  # would track https://www.github.com/hansolo/rails
+  # but a full URI path won't use CONFIG[:username]
+  # >rails/rails
+  # would track https://www.github.com/rails/rails
   #
   # hubeyerc format: username: hansolo
   ::Hubeye::Config::Parser.new(CONFIG_FILE) do |c|
-    USERNAME = c.username || ''
-    ONCEAROUND = c.oncearound || 60
-    TRACK_DEFAULT = c.track || []
-    HOOKS_DEFAULT = c.hooks || []
+    CONFIG[:username]   = c.username || ''
+    CONFIG[:oncearound] = c.oncearound || 60
+    CONFIG[:load_repos] = c.load_repos || []
+    CONFIG[:load_hooks] = c.load_hooks || []
+    # returns true or false if defined in hubeyerc
+    CONFIG[:notification_wanted] = case c.notification_wanted
+                          when false
+                            false
+                          when true
+                            true
+                          when nil
+                            # default is true if not defined in hubeyerc
+                            true
+                          end
   end
+
+  CONFIG[:desktop_notification] = (CONFIG[:notification_wanted] ? Notification::Finder.find_notify : nil)
 
   class InputError < StandardError; end
 
@@ -59,13 +74,13 @@ module Server
     setup_env(options)
     loop do
       catch(:next) do
-      not_connected() unless @remote_connection
-      get_input(@socket)
-      puts @input if @debug
-      parse_input()
-      get_github_doc("/#{@username}/#{@repo_name}")
-      parse_doc()
-      @username = USERNAME
+        not_connected() unless @remote_connection
+        get_input(@socket)
+        puts @input if @debug
+        parse_input()
+        get_github_doc("/#{@username}/#{@repo_name}")
+        parse_doc()
+        @username = CONFIG[:username]
       end
     end
   end
@@ -79,29 +94,40 @@ module Server
   def setup_env(options={})
     @daemonized = options[:daemon]
     @sockets = [@server]  # An array of sockets we'll monitor
-    if !TRACK_DEFAULT.empty?
-      # default tracked arrays (hubeyerc configurations)
-      @hubeye_tracker = TRACK_DEFAULT
-      track_default = TRACK_DEFAULT.dup
-
-      track_default.each do |repo|
-        commit_msg = get_commit_msg(repo)
-        # next unless commit_msg is non-false
-        commit_msg ? nil : next
-        ary_index = track_default.index(repo)
-        track_default.insert(ary_index + 1, commit_msg)
-      end
-
-      @ary_commits_repos = track_default
-    else
+    if CONFIG[:load_repos].empty?
       @ary_commits_repos = []
       @hubeye_tracker = []
+    else
+      # default tracking arrays (hubeyerc configurations)
+      @hubeye_tracker = CONFIG[:load_repos]
+      @ary_commits_repos = insert_default_tracking_messages
     end
-    # @username changes if input includes a '/' when removing, adding tracked
-    # repos.
-    @username = USERNAME
+
+    if CONFIG[:load_hooks].empty?
+      # do nothing (the hooks hash is only assigned when needed)
+    else
+      hooks_ary = CONFIG[:load_hooks].dup
+      load_hooks_or_repos :internal_input => hooks_ary,
+                          :internal_input_hooks => true
+    end
+    # @username changes if input includes a '/' when removing and adding
+    # tracked repos.
+    @username = CONFIG[:username]
     @remote_connection = false
   end
+
+  def insert_default_tracking_messages
+    track_default = CONFIG[:load_repos].dup
+    track_default.each do |repo|
+      commit_msg = get_commit_msg(repo)
+      # next unless commit_msg is non-false
+      commit_msg ? nil : next
+      ary_index = track_default.index(repo)
+      track_default.insert(ary_index + 1, commit_msg)
+    end
+    track_default
+  end
+  private :insert_default_tracking_messages
 
 
   def not_connected
@@ -118,7 +144,7 @@ module Server
           doc.xpath('//div[@class = "message"]/pre').each do |node|
             commit_msg = node.text
             if @ary_commits_repos.include?(commit_msg)
-              ONCEAROUND.times do
+              CONFIG[:oncearound].times do
                 sleep 1
                 @remote_connection = client_ready(@sockets) ? true : false
                 break if @remote_connection
@@ -137,7 +163,7 @@ module Server
               # if they have a Desktop notification
               # library installed
               change_msg = "Repo #{repo} has changed\nNew commit: #{commit_msg} => #{committer}"
-              case DESKTOP_NOTIFICATION
+              case CONFIG[:desktop_notification]
               when "libnotify"
                 Autotest::GnomeNotify.notify("Hubeye", change_msg)
                 Logger.log_change(repo, commit_msg, committer)
@@ -243,7 +269,7 @@ module Server
     elsif parse_shutdown()
     elsif save_hooks_or_repos()
     elsif load_hooks_or_repos()
-    # parse_hook must be before parse_fullpath_add for the moment
+      # parse_hook must be before parse_fullpath_add for the moment
     elsif parse_hook()
     elsif hook_list()
     elsif tracking_list()
@@ -323,7 +349,7 @@ module Server
     @input.gsub!(/diiv/, '/')
     # make match-$globals parse input
     @input =~ /add ([^\/]+\/\w+) (dir: (\S*) )?cmd: (.*)\Z/
-    @hook_cmds ||= {}
+      @hook_cmds ||= {}
     if $1 != nil && $4 != nil
       if @hook_cmds[$1]
         @hook_cmds[$1] << $4
@@ -368,7 +394,23 @@ module Server
   end
 
 
-  def load_hooks_or_repos
+  # options are internal input: can be true or falselike.
+  # When falselike (nil is default), it outputs to the client socket.
+  # When truelike (such as when used internally), it outputs nothing.
+  def load_hooks_or_repos(options={})
+    opts = {:internal_input => nil, :internal_input_hooks => nil,
+      :internal_input_repos => nil}.merge options
+    if opts[:internal_input].nil?
+      load_hooks_repos_from_terminal_input
+    elsif opts[:internal_input]
+      # can only load hooks from internal input (for now, at least)
+      opts[:internal_input_hooks] = true
+      input = opts[:internal_input]
+      load_hooks_from_internal_input(input)
+    end
+  end
+
+  def load_hooks_repos_from_terminal_input
     if @input =~ %r{\A\s*load hook(s?) (.+)\Z}
       hookfile = "#{ENV['HOME']}/.hubeye/hooks/#{$2}.yml"
 
@@ -422,6 +464,27 @@ module Server
     return
   end
 
+  def load_hooks_from_internal_input(input)
+    if input.respond_to? :to_a
+      input = input.to_a
+      input.each do |hook|
+        hookfile = "#{ENV['HOME']}/.hubeye/hooks/#{hook}.yml"
+        newhook = nil
+        if File.exists?(hookfile)
+          File.open(hookfile) do |f|
+            newhook = ::YAML.load(f)
+          end
+          @hook_cmds ||= {}
+          @hook_cmds = newhook.merge(@hook_cmds)
+        else
+          # do nothing
+        end
+      end
+    else
+      raise ArgumentError.new "#{input} must be array-like"
+    end
+  end
+
 
   # helper method to get commit message for a
   # single repo
@@ -452,6 +515,7 @@ module Server
   def hook_list
     if @input =~ %r{hook list}
       unless @hook_cmds.nil? || @hook_cmds.empty?
+        format_string = ""
         @hook_cmds.each do |repo, ary|
           remote = repo
           if ary.first.include? '/'
@@ -461,11 +525,11 @@ module Server
             cmds = ary
             local = "N/A"
           end
-          format_string = <<-EOS
+          format_string += <<-EOS
 remote: #{remote}
   dir : #{local}
   cmds: #{cmds.each {|cmd| print cmd + ' ' }} \n
-           EOS
+  EOS
         end
         @socket.puts(format_string)
         @socketspoke = true
@@ -611,7 +675,7 @@ remote: #{remote}
       # show the user, via the client, the info and commit msg for the commit
       @socket.puts("#{@info}\n#{@msg}")
 
-    # new commit to tracked repo
+      # new commit to tracked repo
     elsif !@ary_commits_repos.include?(@commit_msg)
       begin
         index_of_msg = @ary_commits_repos.index(@username + "/" + @repo_name) + 1
