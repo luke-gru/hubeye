@@ -340,8 +340,8 @@ module Server
 
 
   def parse_hook
-    if %r{githook add} =~ @input
-      githook_add()
+    if %r{hook add} =~ @input
+      hook_add()
     else
       return
     end
@@ -354,7 +354,7 @@ module Server
   # of array is the local directory for that remote repo, rest are commands
   # related to hooks called on change of commit message (with plans to change
   # that to commit SHA reference) of the remote repo
-  def githook_add
+  def hook_add
     @input.gsub!(/diiv/, '/')
     # make match-$globals parse input
     @input =~ /add ([^\/]+\/\w+) (dir: (\S*) )?cmd: (.*)\Z/
@@ -369,11 +369,11 @@ module Server
       end
       @socket.puts("Hook added")
     else
-      @socket.puts("Format: 'githook add user/repo [dir: /my/dir/repo ] cmd: git pull origin'")
+      @socket.puts("Format: 'hook add user/repo [dir: /my/dir/repo ] cmd: git pull origin'")
     end
     throw(:next)
   end
-  private :githook_add
+  private :hook_add
 
 
   def save_hooks_or_repos
