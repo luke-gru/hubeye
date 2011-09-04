@@ -21,6 +21,25 @@ unless RUBY_VERSION >= '1.9'
   end
 end
 
+unless File.exists? ENV['HOME'] + '/.hubeye'
+  require 'rake'
+  require 'stringio'
+
+  def capture_stdout
+    s = StringIO.new
+    oldstdout = $stdout
+    $stdout = s
+    yield
+    s.string
+  ensure
+    $stdout = oldstdout
+  end
+
+  require File.join(File.expand_path(File.dirname(__FILE__) + "/.."), 'tasks/install')
+  results = capture_stdout { Rake.application['install'].invoke }
+
+end
+
 class Options
   def self.parse(args)
 

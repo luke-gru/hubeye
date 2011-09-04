@@ -16,12 +16,13 @@ module Server
   end
 
   # hubeye
-  require "notification/notification"
+  require "config/parser"
   require "log/logger"
-  require "timehelper/timehelper"
+  require "notification/notification"
   require "hooks/git_hooks"
   require "hooks/executer"
-  require "config/parser"
+  require "helpers/time"
+  include Helpers::Time
 
   CONFIG_FILE = ENV['HOME'] + "/.hubeye/hubeyerc"
   # find Desktop notification system
@@ -203,17 +204,17 @@ module Server
         end
 
         if !@daemonized
-          puts "Client connected at #{::TimeHelper::NOW}"
+          puts "Client connected at #{NOW}"
         end
 
         @socket.flush
         # And log the fact that the client connected
         if @still_logging == true
           # if the client quit, do not wipe the log file
-          Logger.log "Accepted connection from #{@socket.peeraddr[2]} (#{::TimeHelper::NOW})"
+          Logger.log "Accepted connection from #{@socket.peeraddr[2]} (#{NOW})"
         else
           # wipe the log file and start anew
-          Logger.relog "Accepted connection from #{@socket.peeraddr[2]} (#{::TimeHelper::NOW})"
+          Logger.relog "Accepted connection from #{@socket.peeraddr[2]} (#{NOW})"
         end
         Logger.log "local:  #{@socket.addr}"
         Logger.log "peer :  #{@socket.peeraddr}"
@@ -284,7 +285,7 @@ module Server
     if @input == "shutdown"
       # local
       Logger.log "Closing connection to #{@socket.peeraddr[2]}"
-      Logger.log "Shutting down... (#{::TimeHelper::NOW})"
+      Logger.log "Shutting down... (#{NOW})"
       Logger.log ""
       Logger.log ""
       # peer
@@ -606,7 +607,7 @@ remote: #{remote}
       @info = parse_info()
       @msg =  "#{@commit_msg} => #{@committer}".gsub(/\(author\)/, '')
       # log the fact that the user added a repo to be tracked
-      Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{::TimeHelper::NOW})")
+      Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{NOW})")
       # show the user, via the client, the info and commit msg for the commit
       @socket.puts("#{@info}\n#{@msg}")
 

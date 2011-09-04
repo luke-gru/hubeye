@@ -1,5 +1,3 @@
-require File.join(File.dirname(__FILE__), "/../lib/notification/notification")
-
 class NotifyTests < Test::Unit::TestCase
 
   def test_libnotify_on_linux

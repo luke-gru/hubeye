@@ -3,7 +3,7 @@ task :install => :chmod do
 end
 
 task :chmod => :config_file do
-  binfile = File.join(File.dirname(__FILE__), "/bin/hubeye")
+  binfile = File.join(File.expand_path(File.dirname(__FILE__) + '/..'), "/bin/hubeye")
   chmod 0777, binfile unless File.executable?(binfile)
 end
 
