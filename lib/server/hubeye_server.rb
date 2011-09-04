@@ -49,10 +49,11 @@ module Server
   #
   # hubeyerc format: username: hansolo
   ::Hubeye::Config::Parser.new(CONFIG_FILE) do |c|
-    CONFIG[:username]   = c.username || ''
-    CONFIG[:oncearound] = c.oncearound || 60
-    CONFIG[:load_repos] = c.load_repos || []
-    CONFIG[:load_hooks] = c.load_hooks || []
+    CONFIG[:username]       = c.username || ''
+    CONFIG[:oncearound]     = c.oncearound || 60
+    CONFIG[:load_repos]     = c.load_repos || []
+    CONFIG[:load_hooks]     = c.load_hooks || []
+    CONFIG[:default_track]  = c.default_track || []
     # returns true or false if defined in hubeyerc
     CONFIG[:notification_wanted] = case c.notification_wanted
                           when false
@@ -94,12 +95,12 @@ module Server
   def setup_env(options={})
     @daemonized = options[:daemon]
     @sockets = [@server]  # An array of sockets we'll monitor
-    if CONFIG[:load_repos].empty?
+    if CONFIG[:default_track].empty?
       @ary_commits_repos = []
       @hubeye_tracker = []
     else
       # default tracking arrays (hubeyerc configurations)
-      @hubeye_tracker = CONFIG[:load_repos]
+      @hubeye_tracker = CONFIG[:default_track]
       @ary_commits_repos = insert_default_tracking_messages
     end
 
@@ -110,6 +111,14 @@ module Server
       load_hooks_or_repos :internal_input => hooks_ary,
                           :internal_input_hooks => true
     end
+
+    if CONFIG[:load_repos].empty?
+      # do nothing
+    else
+      repos_ary = CONFIG[:load_repos].dup
+      load_hooks_or_repos :internal_input => repos_ary,
+                          :internal_input_repos => true
+    end
     # @username changes if input includes a '/' when removing and adding
     # tracked repos.
     @username = CONFIG[:username]
@@ -117,7 +126,7 @@ module Server
   end
 
   def insert_default_tracking_messages
-    track_default = CONFIG[:load_repos].dup
+    track_default = CONFIG[:default_track].dup
     track_default.each do |repo|
       commit_msg = get_commit_msg(repo)
       # next unless commit_msg is non-false
@@ -403,10 +412,12 @@ module Server
     if opts[:internal_input].nil?
       load_hooks_repos_from_terminal_input
     elsif opts[:internal_input]
-      # can only load hooks from internal input (for now, at least)
-      opts[:internal_input_hooks] = true
       input = opts[:internal_input]
-      load_hooks_from_internal_input(input)
+      if opts[:internal_input_hooks]
+        load_hooks_from_internal_input(input)
+      elsif opts[:internal_input_repos]
+        load_repos_from_internal_input(input)
+      end
     end
   end
 
@@ -477,9 +488,48 @@ module Server
           @hook_cmds ||= {}
           @hook_cmds = newhook.merge(@hook_cmds)
         else
-          # do nothing
+          # do nothing because of no extra processing after this, newhook
+          # can stay nil if the hook file doesn't exist
         end
       end
+    else
+      raise ArgumentError.new "#{input} must be array-like"
+    end
+  end
+
+  def load_repos_from_internal_input(input)
+    if input.respond_to? :to_a
+      input = input.to_a
+      newrepos = []
+      input.each do |repo|
+        repofile = "#{ENV['HOME']}/.hubeye/repos/#{repo}.yml"
+        newrepo = nil
+        if File.exists?(repofile)
+          File.open(repofile) do |f|
+            newrepo = ::YAML.load(f)
+          end
+          # empty repo file, go to next repo file in the array
+          if !newrepo
+            next
+          else
+            # append the newrepo array to the newrepos array
+            newrepos << newrepo
+          end
+        else
+          # file doesn't exist, next repo file
+          next
+        end
+      end # end of input#each
+      # flatten the newrepos array because it contains arrays
+      newrepos.flatten!
+      newrepos.each do |repo|
+        commit_msg = get_commit_msg(repo)
+        commit_msg ? nil : next
+        @ary_commits_repos << repo << commit_msg
+        @hubeye_tracker << repo
+      end
+      @ary_commits_repos.uniq!
+      @hubeye_tracker.uniq!
     else
       raise ArgumentError.new "#{input} must be array-like"
     end
