@@ -1,3 +1,4 @@
 hubeye_server.rb.pid
 doc
 *.gem
+*.html.md
