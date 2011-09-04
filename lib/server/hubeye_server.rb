@@ -21,16 +21,35 @@ module Server
   require "timehelper/timehelper"
   require "hooks/git_hooks"
   require "hooks/executer"
+  require "config/parser"
 
+  CONFIG_FILE = ENV['HOME'] + "/.hubeye/hubeyerc"
+  # find Desktop notification system
+  DESKTOP_NOTIFICATION = Notification::Finder.find_notify
+
+  # Config options: defined in ~/.hubeye/hubeyerc
+  #
+  # Option overview:
+  #
   # ONCEAROUND: 30 (seconds) is the default amount of time for looking
   # for changes in every single repository. If tracking lots of repos,
   # it might be a good idea to increase the value, or hubeye will cry
   # due to overwork, fatigue and general anhedonia.
-  ONCEAROUND = 30
-  # USERNAME: defined in ~/.hubeyerc
-  USERNAME = 'luke-gru'
-  # find Desktop notification system
-  DESKTOP_NOTIFICATION = Notification::Finder.find_notify
+  #
+  # hubeyerc format: oncearound: 1000
+  #
+  # USERNAME: username used when not specified:
+  # when set to 'hansolo'
+  # >rails
+  # would track https//www.github.com/hansolo/rails
+  #
+  # hubeyerc format: username: hansolo
+  ::Hubeye::Config::Parser.new(CONFIG_FILE) do |c|
+    USERNAME = c.username || ''
+    ONCEAROUND = c.oncearound || 60
+    TRACK_DEFAULT = c.track || []
+    HOOKS_DEFAULT = c.hooks || []
+  end
 
   class InputError < StandardError; end
 
@@ -308,7 +327,7 @@ module Server
   def save_hooks_or_repos
     if @input =~ %r{\A\s*save hook(s?) as (.+)\Z}
       if !@hook_cmds.nil? && !@hook_cmds.empty?
-        File.open("#{ENV['HOME']}/hublog/hooks/#{$2}.yml", "w") do |f_out|
+        File.open("#{ENV['HOME']}/.hubeye/hooks/#{$2}.yml", "w") do |f_out|
           ::YAML.dump(@hook_cmds, f_out)
         end
         @socket.puts("Saved hook#{$1} as #{$2}")
@@ -318,7 +337,7 @@ module Server
       throw(:next)
     elsif @input =~ %r{\A\s*save repo(s?) as (.+)\Z}
       if !@hubeye_tracker.empty?
-        File.open("#{ENV['HOME']}/hublog/repos/#{$2}.yml", "w") do |f_out|
+        File.open("#{ENV['HOME']}/.hubeye/repos/#{$2}.yml", "w") do |f_out|
           ::YAML.dump(@hubeye_tracker, f_out)
         end
         @socket.puts("Saved repo#{$1} as #{$2}")
@@ -334,7 +353,7 @@ module Server
 
   def load_hooks_or_repos
     if @input =~ %r{\A\s*load hook(s?) (.+)\Z}
-      hookfile = "#{ENV['HOME']}/hublog/hooks/#{$2}.yml"
+      hookfile = "#{ENV['HOME']}/.hubeye/hooks/#{$2}.yml"
 
       # establish non block-local scope
       newhooks = nil
@@ -351,7 +370,7 @@ module Server
       end
       throw(:next)
     elsif @input =~ %r{\A\s*load repo(s)? (.+)\Z}
-      if File.exists? repo_file = "#{ENV['HOME']}/hublog/repos/#{$2}.yml"
+      if File.exists? repo_file = "#{ENV['HOME']}/.hubeye/repos/#{$2}.yml"
         newrepos = nil
         File.open(repo_file) do |f|
           newrepos = ::YAML.load(f)

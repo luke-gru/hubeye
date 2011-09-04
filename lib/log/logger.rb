@@ -1,14 +1,15 @@
 class Logger
+  LOG_DIR = ENV['HOME'] + "/.hubeye/log"
 
   def self.log(msg)
-    File.open(ENV['HOME'] + "/hublog" * 2, "a") do |f|
+    File.open(LOG_DIR, "a") do |f|
       f.puts(msg)
     end
   end
 
   def self.relog(msg)
     #wipe the file and start anew
-    File.open(ENV['HOME'] + "/hublog" * 2, "w") do |f|
+    File.open(LOG_DIR, "w") do |f|
       f.puts(msg)
     end
   end
