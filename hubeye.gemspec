@@ -5,7 +5,7 @@ require 'rake'
 
 summary = 'Github repository commit watcher -- keep your eye on new commits ' +
           'from multiple repos through an interactive CLI'
-files = FileList['lib/**/*.rb', 'bin/*', '[A-Z]*', 'test/**/*'].to_a
+files = FileList['lib/**/*.rb', 'bin/*', '[A-Z]*', 'test/**/*', 'images/*', 'tasks/*'].to_a
 
 Gem::Specification.new do |s|
   s.name = 'hubeye'
