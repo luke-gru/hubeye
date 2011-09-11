@@ -719,11 +719,11 @@ remote: #{remote}
       @ary_commits_repos << @commit_msg
       # get commit info
       @info = parse_info()
-      @msg =  "#{@commit_msg} => #{@committer}".gsub(/\(author\)/, '')
+      @msg =  "#{@commit_msg}\n  => #{@committer}"
       # log the fact that the user added a repo to be tracked
       Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{NOW})")
       # show the user, via the client, the info and commit msg for the commit
-      @socket.puts("#{@info}\n#{@msg}")
+      @socket.puts("#{@msg}\n#{@info}")
 
       # new commit to tracked repo
     elsif !@ary_commits_repos.include?(@commit_msg)
@@ -752,23 +752,29 @@ remote: #{remote}
 
   def parse_msg(html_doc)
     # get commit msg
-    html_doc.xpath('//div[@class = "message"]/pre').each do |node|
-      return commit_msg = node.text
+    html_doc.xpath('//div[@class = "commit commit-tease js-details-container"]/p[@class = "commit-title"]').each do |node|
+      return commit_msg = node.text.strip
     end
   end
 
 
   def parse_committer
-    @doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
-      return committer = node.text
+    @doc.xpath('//div[@class = "authorship"]/span[@class = "author-name"]').each do |node|
+      return committer = node.text.strip
     end
   end
 
 
   def parse_info
-    @doc.xpath('//div[@class = "machine"]').each do |node|
-      return info =  node.text.gsub(/\n/, '').gsub(/tree/, "\ntree").gsub(/parent.*?(\w)/, "\nparent  \\1").strip!
+    commit_href = @doc.xpath('//p[@class = "commit-title"]/a').map { |link| link['href'] }
+    commit_href.keep_if do |elem|
+      elem =~ /http|\//
+    end.map! do |ele|
+        "https://www.github.com#{ele}" if ele =~ /^\//
+    end.map! do |e|
+        e[0..-30] unless e.nil?
     end
+    commit_href.join "\n"
   end
 
 end # of Server module

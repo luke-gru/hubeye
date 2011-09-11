@@ -36,7 +36,7 @@ class HubeyeClient
   def read_welcome
     # Wait just a bit, to see if the server sends any initial message.
     begin
-      sleep(0.5)            # Wait half a second
+      sleep(1)            # Wait half a second
       msg = @s.readpartial(4096)     # Read whatever is ready
       STDOUT.puts msg.chop      # And display it
     # If nothing was ready to read, just ignore the exception.
