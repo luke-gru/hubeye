@@ -6,12 +6,12 @@ module Server
 
   # vendor
   begin
-    require 'nokogiri'
+    require 'octopi'
   rescue LoadError
     if require 'rubygems'
       retry
     else
-      abort 'Nokogiri is needed to run hubeye. Gem install nokogiri'
+      abort 'Octopi is needed to run hubeye. Gem install octopi'
     end
   end
 
@@ -23,6 +23,7 @@ module Server
   require "hooks/executer"
   require "helpers/time"
   include Helpers::Time
+  include 'octopi'
 
   CONFIG_FILE = ENV['HOME'] + "/.hubeye/hubeyerc"
   CONFIG = {}
@@ -53,7 +54,7 @@ module Server
     CONFIG[:oncearound]     = c.oncearound || 60
     CONFIG[:load_repos]     = c.load_repos || []
     CONFIG[:load_hooks]     = c.load_hooks || []
-    CONFIG[:default_track]  = c.default_track || []
+    CONFIG[:default_track]  = c.default_track || nil
     # returns true or false if defined in hubeyerc
     CONFIG[:notification_wanted] = case c.notification_wanted
                           when false
@@ -66,7 +67,8 @@ module Server
                           end
   end
 
-  CONFIG[:desktop_notification] = (CONFIG[:notification_wanted] ? Notification::Finder.find_notify : nil)
+  CONFIG[:desktop_notification] = (CONFIG[:notification_wanted] ?
+                                  Notification::Finder.find_notify : nil)
 
   class InputError < StandardError; end
 
@@ -79,7 +81,6 @@ module Server
         get_input(@socket)
         puts @input if @debug
         parse_input()
-        get_github_doc("/#{@username}/#{@repo_name}")
         parse_doc()
         @username = CONFIG[:username]
       end
@@ -95,13 +96,16 @@ module Server
   def setup_env(options={})
     @daemonized = options[:daemon]
     @sockets = [@server]  # An array of sockets we'll monitor
-    if CONFIG[:default_track].empty?
-      @ary_commits_repos = []
+    if CONFIG[:default_track].nil?
+      # will be array of 2-element arrays that contain the
+      # tracked repo name [0] and hash of latest sha and latest commit object
+      # for that repo [1]
+      # Example:
+      # [ ['luke-gru/hubeye', {:sha1 => 90j93r0rf389, :commit => <#Commit Object>}], [..., ...] ]
       @hubeye_tracker = []
     else
       # default tracking arrays (hubeyerc configurations)
       @hubeye_tracker = CONFIG[:default_track]
-      @ary_commits_repos = insert_default_tracking_messages
     end
 
     if CONFIG[:load_hooks].empty?
@@ -125,95 +129,113 @@ module Server
     @remote_connection = false
   end
 
-  def insert_default_tracking_messages
-    track_default = CONFIG[:default_track].dup
-    track_default.each do |repo|
-      commit_msg = get_commit_msg(repo)
-      # next unless commit_msg is non-false
-      commit_msg ? nil : next
-      ary_index = track_default.index(repo)
-      track_default.insert(ary_index + 1, commit_msg)
-    end
-    track_default
-  end
-  private :insert_default_tracking_messages
+  class Array
+    class NotTrackerElementError < TypeError ; end
 
+    def extract_old_and_new
+      if length != 2
+        raise NotTrackerElementError.new "#{self} is not a hubeye_tracker element"
+      else
+        tracked_repo, tracked_sha = self[0], self[1][:sha1]
+        username, repo_name = tracked_repo.split '/'
+        gh_user = User.find(username)
+        repo = gh_user.repository repo_name
+      end
+      [tracked_sha, repo]
+    end
+  end
+
+  def @hubeye_tracker.append_or_replace!(repo_name, new_commit_obj)
+    match = nil
+    map do |e|
+      if e[0] == repo_name
+        match = true
+        e[1][:sha1]   = new_commit_obj.id
+        e[1][:commit] = new_commit_obj
+      else
+        e
+      end
+    end
+    match ? self : self << [repo_name, {:sha1   => new_commit_obj.id,
+                                        :commit => new_commit_obj}]
+  end
+
+  def @hubeye_tracker.eyeing
+    (ary = []).tap do
+      each do |e|
+        ary << e[0]
+      end
+    end
+  end
+
+  def @hubeye_tracker.rm_repo(repo_name)
+    match = nil
+    map do |e|
+      if e[0] == repo_name
+        match = true
+        repo_name.delete(e)
+      else
+        e
+      end
+    end
+    match
+  end
 
   def not_connected
     # if no client is connected, but the commits array contains repos
-    if @sockets.size == 1 and @ary_commits_repos.empty? == false
+    if @sockets.size == 1 and not @hubeye_tracker.empty?
 
       while @remote_connection == false
-        @hubeye_tracker.each do |repo|
-          doc = Nokogiri::HTML(open("https://github.com/#{repo}/"))
-
-          # make variable not block-local
-          commit_msg = nil
-
-          doc.xpath('//div[@class = "message"]/pre').each do |node|
-            commit_msg = node.text
-            if @ary_commits_repos.include?(commit_msg)
-              CONFIG[:oncearound].times do
-                sleep 1
-                @remote_connection = client_ready(@sockets) ? true : false
-                break if @remote_connection
-              end
-            else
-              # There was a change to a tracked repository.
-
-              # make variable not block-local
-              committer = nil
-
-              doc.xpath('//div[@class = "actor"]/div[@class = "name"]').each do |node|
-                committer = node.text
-              end
-
-              # notify of change to repository
-              # if they have a Desktop notification
-              # library installed
-              change_msg = "Repo #{repo} has changed\nNew commit: #{commit_msg} => #{committer}"
-              case CONFIG[:desktop_notification]
-              when "libnotify"
-                Autotest::GnomeNotify.notify("Hubeye", change_msg)
-                Logger.log_change(repo, commit_msg, committer)
-              when "growl"
-                Autotest::Growl.growl("Hubeye", change_msg)
-                Logger.log_change(repo, commit_msg, committer)
-              when nil
-
-                if @daemonized
-                  Logger.log_change(repo, commit_msg, committer)
-                else
-                  Logger.log_change(repo, commit_msg, committer, :include_terminal => true)
-                end
-
-              end
-              # execute any hooks for that repository
-              unless @hook_cmds.nil? || @hook_cmds.empty?
-                if @hook_cmds[repo]
-                  hook_cmds = @hook_cmds[repo].dup
-                  dir = (hook_cmds.include?('/') ? hook_cmds.shift : nil)
-
-                  # execute() takes [commands], {options} where
-                  # options = :directory and :repo
-                  Hooks::Command.execute(hook_cmds, :directory => dir, :repo => repo)
-                end
-              end
-
-              @ary_commits_repos << repo
-              @ary_commits_repos << commit_msg
-              # delete the repo and old commit that appear first in the array
-              index_old_HEAD = @ary_commits_repos.index(repo)
-              @ary_commits_repos.delete_at(index_old_HEAD)
-              # and again to get rid of the commit message
-              @ary_commits_repos.delete_at(index_old_HEAD)
+        @hubeye_tracker.each do |ary|
+          old_sha, new_repo = ary.extract_old_and_new
+          new_commit = new_repo.commits.first
+          if new_commit.id == old_sha
+            CONFIG[:oncearound].times do
+              sleep 1
+              @remote_connection = client_ready(@sockets) ? true : false
+              break if @remote_connection
             end
+          else
+            # There was a change to a tracked repository.
+            repo       = new_repo.name
+            commit_msg = new_commit.message
+            committer  = new_commit.author['name']
+            # notify of change to repository
+            # if they have a Desktop notification
+            # library installed
+            change_msg = "Repo #{repo} has changed\nNew commit: #{commit_msg} => #{committer}"
+            case CONFIG[:desktop_notification]
+            when "libnotify"
+              Autotest::GnomeNotify.notify("Hubeye", change_msg)
+              Logger.log_change(repo, commit_msg, committer)
+            when "growl"
+              Autotest::Growl.growl("Hubeye", change_msg)
+              Logger.log_change(repo, commit_msg, committer)
+            when nil
+              if @daemonized
+                Logger.log_change(repo, commit_msg, committer)
+              else
+                Logger.log_change(repo, commit_msg, committer, :include_terminal => true)
+              end
+            end
+            # execute any hooks for that repository
+            unless @hook_cmds.nil? || @hook_cmds.empty?
+              if @hook_cmds[repo]
+                hook_cmds = @hook_cmds[repo].dup
+                dir = (hook_cmds.include?('/') ? hook_cmds.shift : nil)
+
+                # execute() takes [commands], {options} where
+                # options = :directory and :repo
+                Hooks::Command.execute(hook_cmds, :directory => dir, :repo => repo)
+              end
+            end
+            @hubeye_tracker.append_or_replace!(repo, new_commit)
           end
         end
         redo unless @remote_connection
       end # end of (while remote_connection == false)
+      client_connect(@sockets)
     end
-    client_connect(@sockets)
   end
 
 
@@ -233,7 +255,7 @@ module Server
         sockets << @socket         # Add it to the set of sockets
         # Inform the client of connection
         if !@hubeye_tracker.empty?
-          @socket.puts "Hubeye running on #{Socket.gethostname}\nTracking:#{@hubeye_tracker.join(' ')}"
+          @socket.puts "Hubeye running on #{Socket.gethostname}\nTracking:#{@hubeye_tracker.eyeing.join ', '}"
         else
           @socket.puts "Hubeye running on #{Socket.gethostname}"
         end
@@ -298,11 +320,8 @@ module Server
       @socket.puts("Bye!")  # Say goodbye
       Logger.log "Closing connection to #{@socket.peeraddr[2]}"
       @remote_connection = false
-      if !@ary_commits_repos.empty?
-        Logger.log "Tracking: "
-        @ary_commits_repos.each do |repo|
-          Logger.log repo if @ary_commits_repos.index(repo).even?
-        end
+      if !@hubeye_tracker.empty?
+        Logger.log "Tracking: #{@hubeye_tracker.eyeing.join ', '}"
       end
       Logger.log "" # to look pretty when multiple connections per loop
       @sockets.delete(@socket)  # Stop monitoring the socket
@@ -328,7 +347,7 @@ module Server
     else
       return
     end
-    shutdown()
+    shutdown
   end
 
 
@@ -341,14 +360,13 @@ module Server
 
   def parse_hook
     if %r{hook add} =~ @input
-      hook_add()
+      hook_add
     else
       return
     end
   end
 
 
-  ##
   # @hook_cmds:
   # repo is the key, value is array of directory and commands. First element
   # of array is the local directory for that remote repo, rest are commands
@@ -390,7 +408,7 @@ module Server
     elsif @input =~ %r{\A\s*save repo(s?) as (.+)\Z}
       if !@hubeye_tracker.empty?
         File.open("#{ENV['HOME']}/.hubeye/repos/#{$2}.yml", "w") do |f_out|
-          ::YAML.dump(@hubeye_tracker, f_out)
+          ::YAML.dump(@hubeye_tracker.eyeing, f_out)
         end
         @socket.puts("Saved repo#{$1} as #{$2}")
       else
@@ -452,20 +470,15 @@ module Server
         end
         # newrepos is an array of repos to be tracked
         newrepos.each do |e|
-          # append the repo and the newest commit message to the repos and
-          # commit messages array, then inform the client of the newest
-          # commit message
-          commit_msg = get_commit_msg(e)
-          # if the commit_msg is non-false, don't do anything, otherwise 'next'
-          commit_msg ? nil : next
-          @ary_commits_repos << e << commit_msg
-          # and append the repo to the hubeye_tracker array
-          @hubeye_tracker << e
+          # append the repo name and the commit hash to the hubeye tracker
+          # array, then inform the client of the newest commit message
+          username, repo = e.split '/'
+          gh_user = User.find(username)
+          gh_repo = gh_user.repository repo
+          new_commit = gh_repo.commits.first
+          @hubeye_tracker.append_or_replace!(e, new_commit)
         end
-        @ary_commits_repos.uniq!
-        @hubeye_tracker.uniq!
-
-        @socket.puts "Loaded #{$2}.\nTracking:\n#{show_repos_pretty()}"
+        @socket.puts "Loaded #{$2}.\nTracking:\n#{@hubeye_tracker.eyeing.join ', '}"
       else
         # no repo file with that name
         @socket.puts("No file to load from")
@@ -522,45 +535,17 @@ module Server
       end # end of input#each
       # flatten the newrepos array because it contains arrays
       newrepos.flatten!
-      newrepos.each do |repo|
-        commit_msg = get_commit_msg(repo)
-        commit_msg ? nil : next
-        @ary_commits_repos << repo << commit_msg
-        @hubeye_tracker << repo
+      newrepos.each do |e|
+        username, repo = e.split '/'
+        gh_user = User.find(username)
+        gh_repo = gh_user.repository repo
+        new_commit = gh_repo.commits.first
+        @hubeye_tracker.append_or_replace!(e, new_commit)
       end
-      @ary_commits_repos.uniq!
-      @hubeye_tracker.uniq!
     else
       raise ArgumentError.new "#{input} must be array-like"
     end
   end
-
-
-  # helper method to get commit message for a
-  # single repo
-  def get_commit_msg(remote_repo)
-    begin
-      @doc = Nokogiri::HTML(open("https://github.com#{'/' + remote_repo}"))
-    rescue
-      return nil
-    end
-    # returns the commit message
-    commit_msg = parse_msg(@doc)
-  end
-
-
-  def show_repos_pretty
-    pretty_repos = ""
-    @ary_commits_repos.each do |e|
-      if @ary_commits_repos.index(e).even?
-        pretty_repos += e + "\n"
-      else
-        pretty_repos += "  " + e + "\n"
-      end
-    end
-    pretty_repos
-  end
-
 
   def hook_list
     if @input =~ %r{hook list}
@@ -597,7 +582,7 @@ remote: #{remote}
   # they're tracking
   def tracking_list
     if @input =~ /\Atracking\s*\Z/
-      list = show_repos_pretty
+      list = @hubeye_tracker.eyeing.join ', '
       @socket.puts(list)
       throw(:next)
     else
@@ -648,15 +633,9 @@ remote: #{remote}
       else
         @username, @repo_name = "#{@username}/#{$1}".split('/')
       end
-
       begin
-        index_found = @ary_commits_repos.index("#{@username}/#{@repo_name}")
-        if index_found
-          # consecutive indices in the array
-          for i in 1..2
-            @ary_commits_repos.delete_at(index_found)
-          end
-          @hubeye_tracker.delete("#{@username}/#{@repo_name}")
+        rm = @ary_commits_repos.rm_repo("#{@username}/#{@repo_name}")
+        if rm
           @socket.puts("Stopped watching repository #{@username}/#{@repo_name}")
           sleep 0.5
           throw(:next)
@@ -691,98 +670,56 @@ remote: #{remote}
   end
 
 
-  def get_github_doc(full_repo_path)
-    begin
-      # if adding a repo with another username
-      @doc = Nokogiri::HTML(open("https://github.com#{full_repo_path}"))
-    rescue OpenURI::HTTPError
-      @socket.puts("Not a Github repository!")
-      throw(:next)
-    rescue URI::InvalidURIError
-      @socket.puts("Not a valid URI")
-      throw(:next)
-    end
-  end
+  # def parse_doc
+  #   # get commit msg
+  #   @commit_msg = parse_msg(@doc)
+  #   # get committer
+  #   @committer = parse_committer()
 
+  #   # new repo to track
+  #   full_repo_name = "#{@username}/#{@repo_name}"
+  #   if !@ary_commits_repos.include?(full_repo_name)
+  #     @ary_commits_repos << full_repo_name
+  #     @hubeye_tracker << full_repo_name
+  #     @ary_commits_repos << @commit_msg
+  #     # get commit info
+  #     @info = parse_info()
+  #     @msg =  "#{@commit_msg}\n  => #{@committer}"
+  #     # log the fact that the user added a repo to be tracked
+  #     Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{NOW})")
+  #     # show the user, via the client, the info and commit msg for the commit
+  #     @socket.puts("#{@msg}\n#{@info}")
 
-  def parse_doc
-    # get commit msg
-    @commit_msg = parse_msg(@doc)
-    # get committer
-    @committer = parse_committer()
+  #     # new commit to tracked repo
+  #   elsif !@ary_commits_repos.include?(@commit_msg)
+  #     begin
+  #       index_of_msg = @ary_commits_repos.index(@username + "/" + @repo_name) + 1
+  #       @ary_commits_repos.delete_at(index_of_msg)
+  #       @ary_commits_repos.insert(index_of_msg - 1, @commit_msg)
 
-    # new repo to track
-    full_repo_name = "#{@username}/#{@repo_name}"
-    if !@ary_commits_repos.include?(full_repo_name)
-      @ary_commits_repos << full_repo_name
-      @hubeye_tracker << full_repo_name
-      @ary_commits_repos << @commit_msg
-      # get commit info
-      @info = parse_info()
-      @msg =  "#{@commit_msg}\n  => #{@committer}"
-      # log the fact that the user added a repo to be tracked
-      Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{NOW})")
-      # show the user, via the client, the info and commit msg for the commit
-      @socket.puts("#{@msg}\n#{@info}")
-
-      # new commit to tracked repo
-    elsif !@ary_commits_repos.include?(@commit_msg)
-      begin
-        index_of_msg = @ary_commits_repos.index(@username + "/" + @repo_name) + 1
-        @ary_commits_repos.delete_at(index_of_msg)
-        @ary_commits_repos.insert(index_of_msg - 1, @commit_msg)
-
-        # log to the logfile and tell the client
-        if @daemonized
-          Logger.log_change(@repo_name, @commit_msg, @committer,
-                            :include_socket => true)
-        else
-          Logger.log_change(@repo_name, @commit_msg, @committer,
-                            :include_socket => true, :include_terminal => true)
-        end
-      rescue
-        @socket.puts($!)
-      end
-    else
-      # no change to the tracked repo
-      @socket.puts("Repository #{@repo_name} has not changed")
-    end
-  end
-
-
-  def parse_msg(html_doc)
-    # get commit msg
-    html_doc.xpath('//div[@class = "commit commit-tease js-details-container"]/p[@class = "commit-title"]').each do |node|
-      return commit_msg = node.text.strip
-    end
-  end
-
-
-  def parse_committer
-    @doc.xpath('//div[@class = "authorship"]/span[@class = "author-name"]').each do |node|
-      return committer = node.text.strip
-    end
-  end
-
-
-  def parse_info
-    commit_href = @doc.xpath('//p[@class = "commit-title"]/a').map { |link| link['href'] }
-    commit_href.keep_if do |elem|
-      elem =~ /http|\//
-    end.map! do |ele|
-        "https://www.github.com#{ele}" if ele =~ /^\//
-    end.map! do |e|
-        e[0..-30] unless e.nil?
-    end
-    commit_href.join "\n"
-  end
+  #       # log to the logfile and tell the client
+  #       if @daemonized
+  #         Logger.log_change(@repo_name, @commit_msg, @committer,
+  #                           :include_socket => true)
+  #       else
+  #         Logger.log_change(@repo_name, @commit_msg, @committer,
+  #                           :include_socket => true, :include_terminal => true)
+  #       end
+  #     rescue
+  #       @socket.puts($!)
+  #     end
+  #   else
+  #     # no change to the tracked repo
+  #     @socket.puts("Repository #{@repo_name} has not changed")
+  #   end
+  # end
 
 end # of Server module
 
 class HubeyeServer
   include Server
 
-  def initialize(debug=false)
+  def initialize(debug=true)
     @debug = debug
   end
 

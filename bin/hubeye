@@ -17,7 +17,7 @@ unless RUBY_VERSION >= '1.9'
     retry
   else
     raise "The daemons gem is needed to run hubeye as a daemon " +
-                     "on Ruby < 1.9"
+          "on Ruby < 1.9"
   end
 end
 
