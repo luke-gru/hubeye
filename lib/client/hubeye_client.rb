@@ -36,12 +36,11 @@ class HubeyeClient
   def read_welcome
     # Wait just a bit, to see if the server sends any initial message.
     begin
-      sleep(1)            # Wait half a second
+      sleep(1)            # Wait a second
       msg = @s.readpartial(4096)     # Read whatever is ready
       STDOUT.puts msg.chop      # And display it
     # If nothing was ready to read, just ignore the exception.
-    rescue SystemCallError
-    rescue NoMethodError
+    rescue SystemCallError, NoMethodError
       STDOUT.puts "The server's not running!"
     end
   end
@@ -64,7 +63,13 @@ class HubeyeClient
         # The server may send more than one line, so use readpartial
         # to read whatever it sends (as long as it all arrives in one chunk).
 
-        sleep 0.5
+        if local =~ /load repo/
+          puts "Loading..."
+          sleep 1
+        else
+          sleep 0.5
+        end
+
         begin
           response = @s.readpartial(4096)
         rescue EOFError

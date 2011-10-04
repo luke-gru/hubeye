@@ -49,7 +49,7 @@ module Server
   #
   # hubeyerc format: username: hansolo
   ::Hubeye::Config::Parser.new(CONFIG_FILE) do |c|
-    CONFIG[:username]       = c.username || ''
+    CONFIG[:username]       = c.username || 'luke-gru'
     CONFIG[:oncearound]     = c.oncearound || 60
     CONFIG[:load_repos]     = c.load_repos || []
     CONFIG[:load_hooks]     = c.load_hooks || []
@@ -685,19 +685,26 @@ remote: #{remote}
   end
 
   def parse_doc
-    gh_user = User.find(@username)
-    gh_repo = gh_user.repository @repo_name
+    @full_repo_name = "#{@username}/#{@repo_name}"
+    begin
+      gh_user = User.find(@username)
+      gh_repo = gh_user.repository @repo_name
+    rescue ArgumentError, Octopi::NotFound
+      #Octopi library's User.find ArgumentError
+      @socket.puts "Not a Github repository name"
+      throw :next
+    end
     new_commit = gh_repo.commits.first
-    replace = @hubeye_tracker.append_or_replace!(@repo_name, new_commit)
+    replace = @hubeye_tracker.append_or_replace!(@full_repo_name, new_commit)
     # new repo to track
     if !replace
       # get commit info
       commit_msg = new_commit.message
       committer  = new_commit.author['name']
-      msg =  "#{commit_msg}\n  => #{committer}"
-      url = "https://www.github.com#{new_commit.url}"
+      msg =  "#{commit_msg}\n=> #{committer}"
+      url = "https://www.github.com#{new_commit.url[0..-30]}"
       # log the fact that the user added a repo to be tracked
-      Logger.log("Added to tracker: #{gh_repo.name} (#{NOW})")
+      Logger.log("Added to tracker: #{@full_repo_name} (#{NOW})")
       # show the user, via the client, the info and commit msg for the commit
       @socket.puts("#{msg}\n#{url}")
 
@@ -706,10 +713,10 @@ remote: #{remote}
       begin
         # log to the logfile and tell the client
         if @daemonized
-          Logger.log_change(gh_repo.name, commit_msg, committer,
+          Logger.log_change(@full_repo_name, commit_msg, committer,
                             :include_socket => true)
         else
-          Logger.log_change(gh_repo.name, commit_msg, committer,
+          Logger.log_change(@full_repo_name, commit_msg, committer,
                             :include_socket => true, :include_terminal => true)
         end
       rescue
@@ -717,7 +724,7 @@ remote: #{remote}
       end
     else
       # no change to the tracked repo
-      @socket.puts("Repository #{gh_repo.name} has not changed")
+      @socket.puts("Repository #{@full_repo_name} has not changed")
     end
   end
 
