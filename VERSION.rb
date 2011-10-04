@@ -1,5 +1,5 @@
 class Hubeye
-  # 0.0.5 since sept.10 2011
-  VERSION = [0,0,5]
+  # 0.1.0 since oct.4, 2011
+  VERSION = [0,1,0]
 end
 

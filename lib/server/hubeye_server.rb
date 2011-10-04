@@ -155,30 +155,36 @@ module Server
   end
 
   def setup_hubeye_singleton_methods
-    def_append_or_replace!
+    def_try_append_or_replace!
     def_eyeing
     def_rm_repo
   end
 
-  def def_append_or_replace!
+  def def_try_append_or_replace!
     @hubeye_tracker.singleton_class.class_eval do
-      define_method :append_or_replace! do |repo_name, new_commit_obj|
+      define_method :try_append_or_replace! do |repo_name, new_commit_obj|
+        status = {:replace => nil, :add => nil, :same => true}
         match = nil
-        map do |e|
+        map! do |e|
           if e[0] == repo_name
             match = true
-            e[1][:sha1]   = new_commit_obj.id
-            e[1][:commit] = new_commit_obj
+            if e[1][:sha1] == new_commit_obj.id
+              e
+            else
+              e[1][:sha1]   = new_commit_obj.id
+              e[1][:commit] = new_commit_obj
+              status = status.merge :replace => true, :same => false
+            end
           else
             e
           end
-        end
+        end # end of map!
         if match
-          return true
+          return status
         else
-          self << [repo_name, {:sha1   => new_commit_obj.id,
-            :commit => new_commit_obj}]
-          return nil
+          self << [repo_name, {:sha1 => new_commit_obj.id,
+                               :commit => new_commit_obj}]
+          return status.merge :add => true, :same => false
         end
       end
     end
@@ -200,13 +206,8 @@ module Server
     @hubeye_tracker.singleton_class.class_eval do
       define_method :rm_repo do |repo_name|
         match = nil
-        map do |e|
-          if e[0] == repo_name
-            match = true
-            repo_name.delete(e)
-          else
-            e
-          end
+        reject! do |e|
+          e[0] == repo_name ? match = true : nil
         end
         match
       end
@@ -219,25 +220,30 @@ module Server
     if @sockets.size == 1 and !@hubeye_tracker.empty?
 
       while @remote_connection == false
-        sleep_amt = CONFIG[:oncearound] / @hubeye_tracker.count
+        sleep_amt = CONFIG[:oncearound] / @hubeye_tracker.length
         @hubeye_tracker.each do |ary|
+          # this method does api calls, takes a couple of seconds to
+          # complete right now (TODO: see what's taking so long)
+          start_time = Time.now
           old_sha, new_repo = ary.extract_old_and_new
+          api_time = (Time.now - start_time).to_i
           new_commit = new_repo.commits.first
           if new_commit.id == old_sha
-            sleep_amt.times do
+            (sleep_amt - api_time).times do
               sleep 1
               @remote_connection = client_ready(@sockets) ? true : false
               break if @remote_connection
             end
           else
             # There was a change to a tracked repository.
-            full_repo_name = ary[0] + '/' + new_repo.name
+            full_repo_name = ary[0]
             commit_msg     = new_commit.message
             committer      = new_commit.author['name']
             # notify of change to repository
             # if they have a Desktop notification
             # library installed
-            change_msg = "Repo #{full_repo_name} has changed\nNew commit: #{commit_msg} => #{committer}"
+            change_msg = "Repo #{full_repo_name} has changed\nNew commit: " +
+                         "#{commit_msg}\n=> #{committer}"
             case CONFIG[:desktop_notification]
             when "libnotify"
               Autotest::GnomeNotify.notify("Hubeye", change_msg)
@@ -263,7 +269,7 @@ module Server
                 Hooks::Command.execute(hook_cmds, :directory => dir, :repo => repo)
               end
             end
-            @hubeye_tracker.append_or_replace!(full_repo_name, new_commit)
+            @hubeye_tracker.try_append_or_replace!(full_repo_name, new_commit)
           end
         end
         redo unless @remote_connection
@@ -511,7 +517,7 @@ module Server
           gh_user = User.find(username)
           gh_repo = gh_user.repository repo
           new_commit = gh_repo.commits.first
-          @hubeye_tracker.append_or_replace!(e, new_commit)
+          @hubeye_tracker.try_append_or_replace!(e, new_commit)
         end
         @socket.puts "Loaded #{$2}.\nTracking:\n#{@hubeye_tracker.eyeing.join ', '}"
       else
@@ -575,7 +581,7 @@ module Server
         gh_user = User.find(username)
         gh_repo = gh_user.repository repo
         new_commit = gh_repo.commits.first
-        @hubeye_tracker.append_or_replace!(e, new_commit)
+        @hubeye_tracker.try_append_or_replace!(e, new_commit)
       end
     else
       raise ArgumentError.new "#{input} must be array-like"
@@ -668,18 +674,13 @@ remote: #{remote}
       else
         @username, @repo_name = "#{@username}/#{$1}".split('/')
       end
-      begin
-        rm = @ary_commits_repos.rm_repo("#{@username}/#{@repo_name}")
-        if rm
-          @socket.puts("Stopped watching repository #{@username}/#{@repo_name}")
-          sleep 0.5
-          throw(:next)
-        else
-          @socket.puts("Repository #{@username}/#{@repo_name} not currently being watched")
-          throw(:next)
-        end
-      rescue
-        @socket.puts($!)
+      rm = @hubeye_tracker.rm_repo("#{@username}/#{@repo_name}")
+      if rm
+        @socket.puts("Stopped watching repository #{@username}/#{@repo_name}")
+        sleep 0.5
+        throw(:next)
+      else
+        @socket.puts("Repository #{@username}/#{@repo_name} not currently being watched")
         throw(:next)
       end
     else
@@ -715,21 +716,24 @@ remote: #{remote}
       throw :next
     end
     new_commit = gh_repo.commits.first
-    replace = @hubeye_tracker.append_or_replace!(@full_repo_name, new_commit)
+    change_status = @hubeye_tracker.try_append_or_replace!(@full_repo_name, new_commit)
+    # get commit info
+    commit_msg = new_commit.message
+    committer  = new_commit.author['name']
+    url = "https://www.github.com#{new_commit.url[0..-30]}"
+    msg =  "#{commit_msg}\n=> #{committer}"
     # new repo to track
-    if !replace
-      # get commit info
-      commit_msg = new_commit.message
-      committer  = new_commit.author['name']
-      msg =  "#{commit_msg}\n=> #{committer}"
-      url = "https://www.github.com#{new_commit.url[0..-30]}"
+    if change_status[:add]
       # log the fact that the user added a repo to be tracked
       Logger.log("Added to tracker: #{@full_repo_name} (#{NOW})")
       # show the user, via the client, the info and commit msg for the commit
       @socket.puts("#{msg}\n#{url}")
 
       # new commit to tracked repo
-    elsif replace
+    elsif change_status[:replace]
+      change_msg = "New commit on #{@full_repo_name}\n"
+      change_msg << "#{msg}\n#{url}"
+      @socket.puts(change_msg)
       begin
         # log to the logfile and tell the client
         if @daemonized
@@ -739,7 +743,7 @@ remote: #{remote}
                             :include_terminal => true)
         end
       rescue
-        @socket.puts($!)
+        throw :next
       end
     else
       # no change to the tracked repo
