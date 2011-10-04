@@ -13,6 +13,7 @@ module Server
       abort 'Octopi is needed to run hubeye. Gem install octopi'
     end
   end
+  include Octopi
 
   # hubeye
   require "config/parser"
@@ -22,7 +23,6 @@ module Server
   require "hooks/executer"
   require "helpers/time"
   include Helpers::Time
-  include Octopi
 
   CONFIG_FILE = ENV['HOME'] + "/.hubeye/hubeyerc"
   CONFIG = {}
@@ -32,24 +32,23 @@ module Server
   #
   # Option overview:
   #
-  # CONFIG[:oncearound]: 30 (seconds) is the default amount of time for looking
+  # CONFIG[:oncearound]: 60 (seconds) is the default amount of time for looking
   # for changes in every single repository. If tracking lots of repos,
   # it might be a good idea to increase the value, or hubeye will cry
   # due to overwork, fatigue and general anhedonia.
   #
-  # hubeyerc format: oncearound: 1000
+  # hubeyerc format => oncearound: 1000
   #
-  # CONFIG[:username] is the username used when not specified:
+  # CONFIG[:username] is the username used when not specified.
+  # hubeyerc format => username: 'hansolo'
   # when set to 'hansolo'
   # >rails
   # would track https://www.github.com/hansolo/rails
   # but a full URI path won't use CONFIG[:username]
   # >rails/rails
   # would track https://www.github.com/rails/rails
-  #
-  # hubeyerc format: username: hansolo
   ::Hubeye::Config::Parser.new(CONFIG_FILE) do |c|
-    CONFIG[:username]       = c.username || 'luke-gru'
+    CONFIG[:username]       = c.username || 'john_doe'
     CONFIG[:oncearound]     = c.oncearound || 60
     CONFIG[:load_repos]     = c.load_repos || []
     CONFIG[:load_hooks]     = c.load_hooks || []
@@ -135,19 +134,33 @@ module Server
 
     def extract_old_and_new
       if length != 2
-        raise NotTrackerElementError.new "#{self} is not a hubeye_tracker element"
+        raise NotTrackerElementError.new "#{self} is not a @hubeye_tracker element"
       else
-        p self
         tracked_repo, tracked_sha = self[0], self[1][:sha1]
         username, repo_name = tracked_repo.split '/'
-        gh_user = User.find(username)
-        repo = gh_user.repository repo_name
+        begin
+          gh_user = User.find(username)
+        rescue Octopi::NotFound
+          # fall back to using default username if not found
+          gh_user = @username
+        end
+        begin
+          repo = gh_user.repository repo_name
+        rescue Octopi::NotFound
+          raise
+        end
       end
       [tracked_sha, repo]
     end
   end
 
   def setup_hubeye_singleton_methods
+    def_append_or_replace!
+    def_eyeing
+    def_rm_repo
+  end
+
+  def def_append_or_replace!
     @hubeye_tracker.singleton_class.class_eval do
       define_method :append_or_replace! do |repo_name, new_commit_obj|
         match = nil
@@ -169,6 +182,9 @@ module Server
         end
       end
     end
+  end
+
+  def def_eyeing
     @hubeye_tracker.singleton_class.class_eval do
       define_method :eyeing do
         (ary = []).tap do
@@ -178,6 +194,9 @@ module Server
         end
       end
     end
+  end
+
+  def def_rm_repo
     @hubeye_tracker.singleton_class.class_eval do
       define_method :rm_repo do |repo_name|
         match = nil
@@ -200,43 +219,43 @@ module Server
     if @sockets.size == 1 and !@hubeye_tracker.empty?
 
       while @remote_connection == false
+        sleep_amt = CONFIG[:oncearound] / @hubeye_tracker.count
         @hubeye_tracker.each do |ary|
           old_sha, new_repo = ary.extract_old_and_new
           new_commit = new_repo.commits.first
-          puts new_commit.id
           if new_commit.id == old_sha
-            CONFIG[:oncearound].times do
+            sleep_amt.times do
               sleep 1
               @remote_connection = client_ready(@sockets) ? true : false
               break if @remote_connection
             end
           else
             # There was a change to a tracked repository.
-            repo       = new_repo.name
-            commit_msg = new_commit.message
-            committer  = new_commit.author['name']
+            full_repo_name = ary[0] + '/' + new_repo.name
+            commit_msg     = new_commit.message
+            committer      = new_commit.author['name']
             # notify of change to repository
             # if they have a Desktop notification
             # library installed
-            change_msg = "Repo #{repo} has changed\nNew commit: #{commit_msg} => #{committer}"
+            change_msg = "Repo #{full_repo_name} has changed\nNew commit: #{commit_msg} => #{committer}"
             case CONFIG[:desktop_notification]
             when "libnotify"
               Autotest::GnomeNotify.notify("Hubeye", change_msg)
-              Logger.log_change(repo, commit_msg, committer)
+              Logger.log_change(full_repo_name, commit_msg, committer)
             when "growl"
               Autotest::Growl.growl("Hubeye", change_msg)
-              Logger.log_change(repo, commit_msg, committer)
+              Logger.log_change(full_repo_name, commit_msg, committer)
             when nil
               if @daemonized
-                Logger.log_change(repo, commit_msg, committer)
+                Logger.log_change(full_repo_name, commit_msg, committer)
               else
-                Logger.log_change(repo, commit_msg, committer, :include_terminal => true)
+                Logger.log_change(full_repo_name, commit_msg, committer, :include_terminal => true)
               end
             end
             # execute any hooks for that repository
             unless @hook_cmds.nil? || @hook_cmds.empty?
-              if @hook_cmds[repo]
-                hook_cmds = @hook_cmds[repo].dup
+              if @hook_cmds[full_repo_name]
+                hook_cmds = @hook_cmds[full_repo_name].dup
                 dir = (hook_cmds.include?('/') ? hook_cmds.shift : nil)
 
                 # execute() takes [commands], {options} where
@@ -244,7 +263,7 @@ module Server
                 Hooks::Command.execute(hook_cmds, :directory => dir, :repo => repo)
               end
             end
-            @hubeye_tracker.append_or_replace!(repo, new_commit)
+            @hubeye_tracker.append_or_replace!(full_repo_name, new_commit)
           end
         end
         redo unless @remote_connection
@@ -269,10 +288,11 @@ module Server
         @socket = client           # From here on in referred to as @socket
         sockets << @socket         # Add it to the set of sockets
         # Inform the client of connection
+        basic_inform = "Hubeye running on #{Socket.gethostname} as #{@username}"
         if !@hubeye_tracker.empty?
-          @socket.puts "Hubeye running on #{Socket.gethostname}\nTracking:#{@hubeye_tracker.eyeing.join ', '}"
+          @socket.puts "#{basic_inform}\nTracking:#{@hubeye_tracker.eyeing.join ', '}"
         else
-          @socket.puts "Hubeye running on #{Socket.gethostname}"
+          @socket.puts basic_inform
         end
 
         if !@daemonized
@@ -709,15 +729,14 @@ remote: #{remote}
       @socket.puts("#{msg}\n#{url}")
 
       # new commit to tracked repo
-    elsif !replace
+    elsif replace
       begin
         # log to the logfile and tell the client
         if @daemonized
-          Logger.log_change(@full_repo_name, commit_msg, committer,
-                            :include_socket => true)
+          Logger.log_change(@full_repo_name, commit_msg, committer)
         else
           Logger.log_change(@full_repo_name, commit_msg, committer,
-                            :include_socket => true, :include_terminal => true)
+                            :include_terminal => true)
         end
       rescue
         @socket.puts($!)

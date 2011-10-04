@@ -8,10 +8,10 @@ module Notification
       elsif RUBY_PLATFORM =~ /linux/
         libnotify = system('locate libnotify-bin > /dev/null')
 
-        if libnotify && LibChecker.autotest
+        if libnotify && LibCheck.autotest
           require_relative "gnomenotify"
           return "libnotify"
-        elsif LibChecker.autotest_notification
+        elsif LibCheck.autotest_notification
           require_relative "growl"
           return "growl"
         else
@@ -20,9 +20,9 @@ module Notification
 
       elsif RUBY_PLATFORM =~ /darwin/i
 
-        if LibChecker.autotest_notification
-        require_relative "growl"
-        return "growl"
+        if LibCheck.autotest_notification
+          require_relative "growl"
+          return "growl"
         else
           return
         end
@@ -32,7 +32,7 @@ module Notification
 
   end
 
-  class LibChecker
+  class LibCheck
 
     class << self
       def autotest
