@@ -1,7 +1,6 @@
 module Server
   # standard lib.
   require 'socket'
-  require 'open-uri'
   require 'yaml'
 
   # vendor
@@ -23,7 +22,7 @@ module Server
   require "hooks/executer"
   require "helpers/time"
   include Helpers::Time
-  include 'octopi'
+  include Octopi
 
   CONFIG_FILE = ENV['HOME'] + "/.hubeye/hubeyerc"
   CONFIG = {}
@@ -107,6 +106,7 @@ module Server
       # default tracking arrays (hubeyerc configurations)
       @hubeye_tracker = CONFIG[:default_track]
     end
+    setup_hubeye_singleton_methods
 
     if CONFIG[:load_hooks].empty?
       # do nothing (the hooks hash is only assigned when needed)
@@ -129,13 +129,15 @@ module Server
     @remote_connection = false
   end
 
-  class Array
+  class ::Array
+    include Octopi
     class NotTrackerElementError < TypeError ; end
 
     def extract_old_and_new
       if length != 2
         raise NotTrackerElementError.new "#{self} is not a hubeye_tracker element"
       else
+        p self
         tracked_repo, tracked_sha = self[0], self[1][:sha1]
         username, repo_name = tracked_repo.split '/'
         gh_user = User.find(username)
@@ -145,50 +147,63 @@ module Server
     end
   end
 
-  def @hubeye_tracker.append_or_replace!(repo_name, new_commit_obj)
-    match = nil
-    map do |e|
-      if e[0] == repo_name
-        match = true
-        e[1][:sha1]   = new_commit_obj.id
-        e[1][:commit] = new_commit_obj
-      else
-        e
+  def setup_hubeye_singleton_methods
+    @hubeye_tracker.singleton_class.class_eval do
+      define_method :append_or_replace! do |repo_name, new_commit_obj|
+        match = nil
+        map do |e|
+          if e[0] == repo_name
+            match = true
+            e[1][:sha1]   = new_commit_obj.id
+            e[1][:commit] = new_commit_obj
+          else
+            e
+          end
+        end
+        if match
+          return true
+        else
+          self << [repo_name, {:sha1   => new_commit_obj.id,
+            :commit => new_commit_obj}]
+          return nil
+        end
       end
     end
-    match ? self : self << [repo_name, {:sha1   => new_commit_obj.id,
-                                        :commit => new_commit_obj}]
+    @hubeye_tracker.singleton_class.class_eval do
+      define_method :eyeing do
+        (ary = []).tap do
+          each do |e|
+            ary << e[0]
+          end
+        end
+      end
+    end
+    @hubeye_tracker.singleton_class.class_eval do
+      define_method :rm_repo do |repo_name|
+        match = nil
+        map do |e|
+          if e[0] == repo_name
+            match = true
+            repo_name.delete(e)
+          else
+            e
+          end
+        end
+        match
+      end
+    end
   end
 
-  def @hubeye_tracker.eyeing
-    (ary = []).tap do
-      each do |e|
-        ary << e[0]
-      end
-    end
-  end
-
-  def @hubeye_tracker.rm_repo(repo_name)
-    match = nil
-    map do |e|
-      if e[0] == repo_name
-        match = true
-        repo_name.delete(e)
-      else
-        e
-      end
-    end
-    match
-  end
 
   def not_connected
     # if no client is connected, but the commits array contains repos
-    if @sockets.size == 1 and not @hubeye_tracker.empty?
+    if @sockets.size == 1 and !@hubeye_tracker.empty?
 
       while @remote_connection == false
         @hubeye_tracker.each do |ary|
           old_sha, new_repo = ary.extract_old_and_new
           new_commit = new_repo.commits.first
+          puts new_commit.id
           if new_commit.id == old_sha
             CONFIG[:oncearound].times do
               sleep 1
@@ -234,8 +249,8 @@ module Server
         end
         redo unless @remote_connection
       end # end of (while remote_connection == false)
-      client_connect(@sockets)
     end
+    client_connect(@sockets)
   end
 
 
@@ -669,50 +684,42 @@ remote: #{remote}
     @repo_name = @input
   end
 
+  def parse_doc
+    gh_user = User.find(@username)
+    gh_repo = gh_user.repository @repo_name
+    new_commit = gh_repo.commits.first
+    replace = @hubeye_tracker.append_or_replace!(@repo_name, new_commit)
+    # new repo to track
+    if !replace
+      # get commit info
+      commit_msg = new_commit.message
+      committer  = new_commit.author['name']
+      msg =  "#{commit_msg}\n  => #{committer}"
+      url = "https://www.github.com#{new_commit.url}"
+      # log the fact that the user added a repo to be tracked
+      Logger.log("Added to tracker: #{gh_repo.name} (#{NOW})")
+      # show the user, via the client, the info and commit msg for the commit
+      @socket.puts("#{msg}\n#{url}")
 
-  # def parse_doc
-  #   # get commit msg
-  #   @commit_msg = parse_msg(@doc)
-  #   # get committer
-  #   @committer = parse_committer()
-
-  #   # new repo to track
-  #   full_repo_name = "#{@username}/#{@repo_name}"
-  #   if !@ary_commits_repos.include?(full_repo_name)
-  #     @ary_commits_repos << full_repo_name
-  #     @hubeye_tracker << full_repo_name
-  #     @ary_commits_repos << @commit_msg
-  #     # get commit info
-  #     @info = parse_info()
-  #     @msg =  "#{@commit_msg}\n  => #{@committer}"
-  #     # log the fact that the user added a repo to be tracked
-  #     Logger.log("Added to tracker: #{@ary_commits_repos[-2]} (#{NOW})")
-  #     # show the user, via the client, the info and commit msg for the commit
-  #     @socket.puts("#{@msg}\n#{@info}")
-
-  #     # new commit to tracked repo
-  #   elsif !@ary_commits_repos.include?(@commit_msg)
-  #     begin
-  #       index_of_msg = @ary_commits_repos.index(@username + "/" + @repo_name) + 1
-  #       @ary_commits_repos.delete_at(index_of_msg)
-  #       @ary_commits_repos.insert(index_of_msg - 1, @commit_msg)
-
-  #       # log to the logfile and tell the client
-  #       if @daemonized
-  #         Logger.log_change(@repo_name, @commit_msg, @committer,
-  #                           :include_socket => true)
-  #       else
-  #         Logger.log_change(@repo_name, @commit_msg, @committer,
-  #                           :include_socket => true, :include_terminal => true)
-  #       end
-  #     rescue
-  #       @socket.puts($!)
-  #     end
-  #   else
-  #     # no change to the tracked repo
-  #     @socket.puts("Repository #{@repo_name} has not changed")
-  #   end
-  # end
+      # new commit to tracked repo
+    elsif !replace
+      begin
+        # log to the logfile and tell the client
+        if @daemonized
+          Logger.log_change(gh_repo.name, commit_msg, committer,
+                            :include_socket => true)
+        else
+          Logger.log_change(gh_repo.name, commit_msg, committer,
+                            :include_socket => true, :include_terminal => true)
+        end
+      rescue
+        @socket.puts($!)
+      end
+    else
+      # no change to the tracked repo
+      @socket.puts("Repository #{gh_repo.name} has not changed")
+    end
+  end
 
 end # of Server module
 
