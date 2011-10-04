@@ -13,23 +13,20 @@ class Hubeye
         # not a pretty line, but take options array from element 1,
         # stringify it, get rid of commas separating the repos and
         # split them back into an array on the spaces
-        get_comma_separated_values = Proc.new do
-          options[1..-1].join('').gsub(',', '').split(' ')
-        end
 
         klass.open(config_file) do |f|
           while line = f.gets
-            line.strip!
+            line = line.strip
             next if line.empty?
             options = line.split(':')
-            options.each {|o| o.strip! }
+            options.map! {|o| o.strip }
             case options[0]
             when "username"
               @username = options[1]
             when "track"
-              @default_track = get_comma_separated_values.call
+              @default_track = get_comma_separated_values(options[1])
             when "load repos"
-              @load_repos = get_comma_separated_values.call
+              @load_repos = get_comma_separated_values(options[1])
             when "oncearound"
               @oncearound = options[1].to_i
               if @oncearound.zero?
@@ -37,7 +34,7 @@ class Hubeye
                   "#{options[1]} but must be a number that is greater than 0"
               end
             when "load hooks"
-              @load_hooks = get_comma_separated_values.call
+              @load_hooks = get_comma_separated_values(options[1])
             when "desktop notification"
               on_off = options[1]
               @notification_wanted = case on_off
@@ -53,6 +50,11 @@ class Hubeye
           end
         end
         yield self
+      end
+
+      private
+      def get_comma_separated_values(values)
+        values.split(',').map {|v| v.strip}
       end
 
     end
