@@ -2,24 +2,12 @@
 
 # require environment and VERSION files
 require File.join(File.expand_path(File.dirname(__FILE__) + "/../"), "lib/environment")
-require File.expand_path(File.dirname(__FILE__) + "/../VERSION")
+include Environment
+require File.join(ROOTDIR, 'VERSION')
 
 # standard lib
 require 'optparse'
 require 'ostruct'
-
-# vendor
-unless RUBY_VERSION >= '1.9'
-  begin
-    require 'daemons'
-  rescue
-    require 'rubygems'
-    retry
-  else
-    raise "The daemons gem is needed to run hubeye as a daemon " +
-          "on Ruby < 1.9"
-  end
-end
 
 unless File.exists? ENV['HOME'] + '/.hubeye'
   require 'rake'
@@ -35,7 +23,8 @@ unless File.exists? ENV['HOME'] + '/.hubeye'
     $stdout = oldstdout
   end
 
-  require File.join(File.expand_path(File.dirname(__FILE__) + "/.."), 'tasks/install')
+  require File.join(ROOTDIR, 'tasks/install')
+  # Don't display the results
   results = capture_stdout { Rake.application['install'].invoke }
 
 end
@@ -110,17 +99,17 @@ class Hubeye
           puts "Other instances are running"
           exit 1
         end
-        require File.join(Environment::LIBDIR, '/server/hubeye_server.rb')
+        require File.join(LIBDIR, '/server/hubeye_server')
         options.server_daemonized ? start_server(port, :daemon => true) : start_server(port, :daemon => false)
       else
-        require File.join(Environment::LIBDIR, '/client/hubeye_client.rb')
+        require File.join(LIBDIR, '/client/hubeye_client')
         start_client(host, port)
       end
     end
 
 
     def port_open?(port)
-      # this is the solution until multi-threading is implemented
+      # this is the solution until multi-threading or forking is implemented
       # on the TCP server
       listening_tcps = `netstat -l --tcp --numeric`
       if /#{port}/ =~ listening_tcps
