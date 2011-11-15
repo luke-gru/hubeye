@@ -27,7 +27,7 @@ class Logger
     ===============================
     MSG
     if opts[:include_terminal]
-      puts change_msg
+      STDOUT.puts change_msg
     end
     Logger.log(change_msg)
   end
