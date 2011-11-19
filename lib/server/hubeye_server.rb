@@ -127,32 +127,6 @@ class Hubeye
       end
     end
 
-    # Listen on port (2000 is the default)
-    def listen(port)
-      @server = TCPServer.open(port)
-    end
-
-    def setup_env(options={})
-      @daemonized = options[:daemon]
-      @sockets = [@server]  # An array of sockets we'll monitor
-      @session = Session.new
-      unless CONFIG[:default_track].nil?
-        newly_tracked = {}
-        CONFIG[:default_track].each {|repo| newly_tracked.merge! track(repo)}
-        @session.tracker.merge! newly_tracked
-      end
-      unless CONFIG[:load_hooks].empty?
-        hooks = CONFIG[:load_hooks].dup
-        @session.load :hooks => hooks
-      end
-      unless CONFIG[:load_repos].empty?
-        repos = CONFIG[:load_repos].dup
-        @session.load :repos => repos
-      end
-      @session.username = CONFIG[:username]
-      @remote_connection = false
-    end
-
     # options: :short, :latest, :full (all boolean)
     def track(repo, options)
       opts = {:short => true}.merge options
@@ -181,7 +155,32 @@ class Hubeye
         {full_repo_name => hist}
       end
     end
-    private :track
+
+    private
+    def listen(port)
+      @server = TCPServer.open(port)
+    end
+
+    def setup_env(options={})
+      @daemonized = options[:daemon]
+      @sockets = [@server]  # An array of sockets we'll monitor
+      @session = Session.new
+      unless CONFIG[:default_track].nil?
+        newly_tracked = {}
+        CONFIG[:default_track].each {|repo| newly_tracked.merge! track(repo)}
+        @session.tracker.merge! newly_tracked
+      end
+      unless CONFIG[:load_hooks].empty?
+        hooks = CONFIG[:load_hooks].dup
+        @session.load :hooks => hooks
+      end
+      unless CONFIG[:load_repos].empty?
+        repos = CONFIG[:load_repos].dup
+        @session.load :repos => repos
+      end
+      @session.username = CONFIG[:username]
+      @remote_connection = false
+    end
 
     def look_for_changes
       # if no client is connected, but the commits array contains repos
@@ -202,8 +201,8 @@ class Hubeye
             else
               # There was a change to a tracked repository.
               full_repo_name = new_info.keys.first
-              commit_msg     = new_info['message']
-              committer      = new_info['author']['name']
+              commit_msg     = new_info['commit']['message']
+              committer      = new_info['commit']['committer']['name']
               change_msg = "Repo #{full_repo_name} has changed\nNew commit: " \
                 "#{commit_msg}\n=> #{committer}"
               case CONFIG[:desktop_notification]
@@ -242,7 +241,6 @@ class Hubeye
     def client_ready(sockets)
       select(sockets, nil, nil, 2)
     end
-    private :client_ready
 
     def client_connect(sockets)
       ready = select(sockets)
@@ -276,7 +274,6 @@ class Hubeye
         end
       end
     end
-    private :client_connect
 
     class Strategy
       UnknownStrategy = Class.new(StandardError)
@@ -329,13 +326,13 @@ class Hubeye
       class SaveHook
         def start
           hooks = @session.hooks
-          if !hooks.nil? and !hooks.empty?
-            File.open("#{ENV['HOME']}/.hubeye/hooks/#{@matches[1]}.yml", "w") do |f_out|
+          unless hooks.empty?
+            File.open("#{ENV['HOME']}/.hubeye/hooks/#{@matches[2]}.yml", "w") do |f_out|
               ::YAML.dump(hooks, f_out)
             end
-            @socket.puts("Saved hook #{@matches[0]} as #{@matches[1]}")
+            @socket.puts("Saved hook#{@matches[1]} as #{@matches[2]}")
           else
-            @socket.puts("No hook #{@matches[0]} to save")
+            @socket.puts("No hook#{@matches[1]} to save")
           end
         end
       end
@@ -343,10 +340,10 @@ class Hubeye
       class SaveRepo
         def start
           if !@session.tracker.empty?
-            File.open("#{ENV['HOME']}/.hubeye/repos/#{@matches[1]}.yml", "w") do |f_out|
+            File.open("#{ENV['HOME']}/.hubeye/repos/#{@matches[2]}.yml", "w") do |f_out|
               ::YAML.dump(@session.tracker, f_out)
             end
-            @socket.puts("Saved repo #{@matches[0]} as #{@matches[1]}")
+            @socket.puts("Saved repo#{@matches[1]} as #{@matches[2]}")
           else
             @socket.puts("No remote repos are being tracked")
           end
@@ -355,43 +352,38 @@ class Hubeye
 
       class LoadHook
         def start
-          hookfile = "#{ENV['HOME']}/.hubeye/hooks/#{@matches[1]}.yml"
-          newhooks = nil
+          hookfile = "#{ENV['HOME']}/.hubeye/hooks/#{@matches[2]}.yml"
+          new_hooks = nil
           if File.exists?(hookfile)
             File.open(hookfile) do |f|
-              newhooks = ::YAML.load(f)
+              new_hooks = ::YAML.load(f)
             end
-            @hooks ||= {}
-            @hooks = newhooks.merge(@session.hooks)
-            @socket.puts("Loaded #{@matches[0]} #{@matches[1]}")
+            @session.hooks.merge!(new_hooks)
+            @socket.puts("Loaded #{@matches[1]} #{@matches[2]}")
           else
-            @socket.puts("No #{@matches[0]} file to load from")
+            @socket.puts("No #{@matches[1]} file to load from")
           end
         end
       end
 
       class LoadRepo
         def start
-          if File.exists?(repo_file = "#{ENV['HOME']}/.hubeye/repos/#{$matches[1]}.yml")
-            newrepos = nil
+          if File.exists?(repo_file = "#{ENV['HOME']}/.hubeye/repos/#{@matches[2]}.yml")
+            new_repos = nil
             File.open(repo_file) do |f|
-              newrepos = ::YAML.load(f)
+              new_repos = ::YAML.load(f)
             end
-            if !newrepos
-              @socket.puts "Unable to load #{@matches[1]}: empty file"
+            if !new_repos
+              @socket.puts "Unable to load #{@matches[2]}: empty file"
               return
             end
-            # newrepos is an array of repos to be tracked
-            newrepos.each do |e|
-              # add the repo name and the commit hash to the hubeye tracker
-              # array, then inform the client of the newest commit message
-              username, repo = e.split '/'
-              gh_user = User.find(username)
-              gh_repo = gh_user.repository repo
-              new_commit = gh_repo.commits.first
-              @session.tracker.add_or_replace!(e, new_commit)
+            new_repos.each do |r,s|
+              # add the repo name to the hubeye tracker
+              new_info = @server.track(r, :latest => true)
+              new_sha  = new_info['sha']
+              @session.tracker.add_or_replace!(r, new_sha)
             end
-            @socket.puts "Loaded #{$2}.\nTracking:\n#{@session.tracker.join ', '}"
+            @socket.puts "Loaded #{@matches[2]}.\nTracking:\n#{@session.tracker.keys.join ', '}"
           else
             @socket.puts("No file to load from")
           end
@@ -399,19 +391,20 @@ class Hubeye
       end
 
       class AddHook
-        # @hooks:
-        # repo is the key, value is array of directory and commands. First element
-        # of array is the local directory for that remote repo, rest are commands
-        # related to hooks called on change of commit message (with plans to change
-        # that to commit SHA reference) of the remote repo
         def start
-          if @matches[0] != nil && @matches[3] != nil
-            if @session.hooks[@matches[0]]
-              @session.hooks[@matches[0]] << @matches[3]
-            elsif $matches[1] != nil
-              @session.hooks[@matches[0]] = [ @matches[2], @matches[3] ]
+          if @matches[1] != nil and @matches[4] != nil
+            if @session.hooks[@matches[1]]
+              if @matches[3]
+                @session.hooks[@matches[1]].merge!({@matches[3] => @matches[4]})
+              else
+                @session.hooks[@matches[1]][nil] << @matches[4]
+              end
             else
-              @session.hooks[@matches[0]] = [@matches[3]]
+              if @matches[3]
+                @session.hooks[@matches[1]] = {@matches[3] => @matches[4]}
+              else
+                @session.hooks[@matches[1]] = {nil => [@matches[4]]}
+              end
             end
             @socket.puts("Hook added")
           else
@@ -422,21 +415,26 @@ class Hubeye
 
       class ListHooks
         def start
-          unless @session.hooks.nil? || @session.hooks.empty?
-            @session.hooks.each do |repo, ary|
-              remote = repo
-              if ary.first.include? '/'
-                local = ary.first
-                cmds  = ary[1..-1]
-              else
-                cmds = ary
-                local = "N/A"
+          unless @session.hooks.empty?
+            pwd = File.expand_path('.')
+            format_string = ""
+            @session.hooks.each do |repo, hash|
+              local_dir = nil
+              command = nil
+              hash.each do |dir,cmd|
+                if dir.nil?
+                  local_dir = pwd
+                  command = cmd.join("\n" + (' ' * 8))
+                else
+                  command = cmd
+                  local_dir = dir
+                end
               end
-              format_string = <<-EOS
-  remote: #{remote}
-    dir : #{local}
-    cmds: #{cmds.each {|cmd| print cmd + ' ' }} \n
-    EOS
+              format_string << <<EOS
+remote: #{repo}
+dir:    #{local_dir}
+cmds:   #{command}\n
+EOS
             end
             @socket.puts(format_string)
           else
@@ -547,12 +545,12 @@ class Hubeye
         %r{\A\s*save repo(s?) as (.+)\Z} => lambda {|m, s| SaveRepo.new(m, s)},
         %r{\A\s*load hook(s?) (.+)\Z} => lambda {|m, s| LoadHook.new(m, s)},
         %r{\A\s*load repo(s?) (.+)\Z} => lambda {|m, s| LoadRepo.new(m, s)},
-        %r{hook add} => lambda {|m, s| AddHook.new(m, s)},
-        %r{hook list} => lambda {|m, s| ListHooks.new(m, s)},
+        %r{\Ahook add ([-\w]+/[-\w]+) (dir:\s?(.*))?\s*cmd:\s?(.*)\Z} => lambda {|m, s| AddHook.new(m, s)},
+        %r{\Ahook list\Z} => lambda {|m, s| ListHooks.new(m, s)},
         %r{\Atracking\s*\Z} => lambda {|m, s| ListTracking.new(m, s)},
         %r{^pwd} => lambda {|m, s| AddRepo.new(m, s, :pwd => true)},
         %r{^\s*$} => lambda {|m, s| Next.new(m, s)},
-        %r{\Arm ([\w-]+/?[\w-]*)\Z} => lambda {|m, s| RmRepo.new(m, s)},
+        %r{\Arm ([-\w]+/?[-\w]*)\Z} => lambda {|m, s| RmRepo.new(m, s)},
         lambda {|inp| inp.include? '/'} => lambda {|m, s| AddRepo.new(m, s, :fullpath => true)},
         lambda {|inp| not inp.nil?} => lambda {|m, s| AddRepo.new(m, s)}
       }
