@@ -9,11 +9,6 @@ class Hubeye
       def initialize(config_file, options={})
         opts = {:test => false}.merge options
         if opts[:test] then klass = StringIO else klass = File end
-
-        # not a pretty line, but take options array from element 1,
-        # stringify it, get rid of commas separating the repos and
-        # split them back into an array on the spaces
-
         klass.open(config_file) do |f|
           while line = f.gets
             line = line.strip

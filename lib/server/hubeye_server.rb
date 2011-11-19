@@ -1,26 +1,13 @@
 class Hubeye
   module Server
-
-    class Session
-      attr_writer :tracker, :repo_name, :username, :hooks
-      attr_reader :repo_name, :username
-      def tracker
-        @tracker ||= []
-      end
-
-      def hooks
-        @hooks ||= {}
-      end
-
-      def load
-      end
-    end
-
-    attr_reader :socket, :sockets, :remote_connection, :session
+    attr_accessor :remote_connection
+    attr_reader :socket, :sockets, :session
 
     # standard lib.
     require 'socket'
     require 'yaml'
+    require 'json'
+    require 'open-uri'
     # hubeye
     require "config/parser"
     require "log/logger"
@@ -64,22 +51,79 @@ class Hubeye
       CONFIG[:notification_wanted] = if c.notification_wanted.nil?
                                        true
                                      else
-                                      c.notification_wanted
+                                       c.notification_wanted
                                      end
     end
 
     CONFIG[:desktop_notification] = Notification::Finder.find_notify if
-      CONFIG[:notification_wanted]
+    CONFIG[:notification_wanted]
+
+    class Session
+
+      attr_writer :tracker, :repo_name, :username, :hooks
+      attr_reader :repo_name, :username
+
+      def initialize
+        setup_singleton_methods
+      end
+
+      def tracker
+        @tracker ||= {}
+      end
+
+      def hooks
+        @hooks ||= {}
+      end
+
+      def load options={}
+        opts = {:hooks => nil, :repos => nil}.merge options
+        if opts[:hooks]
+        elsif opts[:repos]
+        else
+          raise ArgumentError
+        end
+      end
+
+      def reset
+        reset_username
+        reset_repo_name
+      end
+
+      private
+      def reset_username
+        self.username = CONFIG[:username]
+      end
+
+      def reset_repo_name
+        self.repo_name = ""
+      end
+
+      def setup_singleton_methods
+        tracker.singleton_class.class_eval do
+          def add_or_replace! repo_name, new_sha
+            if keys.include? repo_name and self[repo_name] == new_sha
+              return
+            elsif keys.include? repo_name
+              ret = {:replace => true}
+            else
+              ret = {:add => true}
+            end
+            self[repo_name] = new_sha
+            ret
+          end
+        end
+      end
+
+    end # end of Session class
 
     def start(port, options={})
       listen(port)
       setup_env(options)
       loop do
-        catch(:next) do
-          not_connected unless @remote_connection
-          strategy = Strategy.new(self)
-          strategy.call
-        end
+        look_for_changes unless @remote_connection
+        strategy = Strategy.new(self)
+        strategy.call
+        @session.reset
       end
     end
 
@@ -93,7 +137,9 @@ class Hubeye
       @sockets = [@server]  # An array of sockets we'll monitor
       @session = Session.new
       unless CONFIG[:default_track].nil?
-        @session.tracker << CONFIG[:default_track]
+        newly_tracked = {}
+        CONFIG[:default_track].each {|repo| newly_tracked.merge! track(repo)}
+        @session.tracker.merge! newly_tracked
       end
       unless CONFIG[:load_hooks].empty?
         hooks = CONFIG[:load_hooks].dup
@@ -107,20 +153,47 @@ class Hubeye
       @remote_connection = false
     end
 
-    def not_connected
+    # options: :short, :latest, :full (all boolean)
+    def track(repo, options)
+      opts = {:short => true}.merge options
+      if repo.include? '/'
+        username, repo_name = repo.split '/'
+        full_repo_name = repo
+      else
+        username, repo_name = @session.username, repo
+        full_repo_name = "#{username}/#{repo_name}"
+      end
+      hist = nil
+      begin
+        open "https://api.github.com/repos/#{username}/" \
+        "#{repo_name}/commits" do |f|
+          hist = JSON.parse f.read
+        end
+      rescue
+        @socket.puts "Not a Github repository name"
+        return
+      end
+      if opts[:short]
+        {full_repo_name => hist.first['sha']}
+      elsif opts[:latest]
+        {full_repo_name => hist.first}
+      else
+        {full_repo_name => hist}
+      end
+    end
+    private :track
+
+    def look_for_changes
       # if no client is connected, but the commits array contains repos
       if @sockets.size == 1 and !@session.tracker.empty?
 
         while @remote_connection == false
           sleep_amt = CONFIG[:oncearound] / @session.tracker.length
-          @session.tracker.each do |ary|
-            # this method does api calls, takes a couple of seconds to
-            # complete right now (TODO: see what's taking so long)
+          @session.tracker.each do |k,v|
             start_time = Time.now
-            old_sha, new_repo = ary.extract_old_and_new
+            new_info = track(k, :latest => true)
             api_time = (Time.now - start_time).to_i
-            new_commit = new_repo.commits.first
-            if new_commit.id == old_sha
+            if new_info[k] == v
               (sleep_amt - api_time).times do
                 sleep 1
                 @remote_connection = client_ready(@sockets) ? true : false
@@ -128,14 +201,11 @@ class Hubeye
               end
             else
               # There was a change to a tracked repository.
-              full_repo_name = ary[0]
-              commit_msg     = new_commit.message
-              committer      = new_commit.author['name']
-              # notify of change to repository
-              # if they have a Desktop notification
-              # library installed
-              change_msg = "Repo #{full_repo_name} has changed\nNew commit: " +
-                          "#{commit_msg}\n=> #{committer}"
+              full_repo_name = new_info.keys.first
+              commit_msg     = new_info['message']
+              committer      = new_info['author']['name']
+              change_msg = "Repo #{full_repo_name} has changed\nNew commit: " \
+                "#{commit_msg}\n=> #{committer}"
               case CONFIG[:desktop_notification]
               when "libnotify"
                 Autotest::GnomeNotify.notify("Hubeye", change_msg)
@@ -160,7 +230,7 @@ class Hubeye
                   Hooks::Command.execute(hook_cmds, :directory => dir, :repo => repo)
                 end
               end
-              @session.tracker.append_or_replace!(full_repo_name, new_commit)
+              @session.tracker.add_or_replace!(full_repo_name, new_commit)
             end
           end
           redo unless @remote_connection
@@ -176,16 +246,16 @@ class Hubeye
 
     def client_connect(sockets)
       ready = select(sockets)
-      readable = ready[0]            # These sockets are readable
-      readable.each do |socket|      # Loop through readable sockets
-        if socket == @server         # If the server socket is ready
-          client = @server.accept    # Accept a new client
-          @socket = client           # From here on in referred to as @socket
-          sockets << @socket         # Add it to the set of sockets
+      readable = ready[0]
+      readable.each do |socket|
+        if socket == @server
+          client = @server.accept
+          @socket = client
+          sockets << @socket
           # Inform the client of connection
           basic_inform = "Hubeye running on #{Socket.gethostname} as #{@session.username}"
           if !@session.tracker.empty?
-            @socket.puts "#{basic_inform}\nTracking:#{@session.tracker.join ', '}"
+            @socket.puts "#{basic_inform}\nTracking:#{@session.tracker.keys.join ', '}"
           else
             @socket.puts basic_inform
           end
@@ -221,30 +291,32 @@ class Hubeye
           Logger.log "Client on #{@server.socket.peeraddr[2]} disconnected."
           @server.sockets.delete(socket)
           @server.socket.close
-          throw(:next)
+          return
         end
-        self.input = @input.chop.strip.downcase
-        self.input.gsub! /diiv/, '/'
+        @input = @input.chop.strip.downcase
+        @input.gsub! /diiv/, '/'
       end
 
-      class Shutdown
+      # strategy classes
+      class Exit
         def start
           @socket.puts "Bye!"
           Logger.log "Closing connection to #{@socket.peeraddr[2]}"
           @server.remote_connection = false
           if !@session.tracker.empty?
-            Logger.log "Tracking: #{@session.tracker.join ', '}"
+            Logger.log "Tracking: #{@session.tracker.keys.join ', '}"
           end
-          Logger.log "" # to look pretty when multiple connections per loop
-          @sockets.delete(@socket)  # Stop monitoring the socket
-          @socket.close  # Terminate the session
+          # to look pretty when multiple connections per loop
+          Logger.log ""
+          @sockets.delete(@socket)
+          @socket.close
         end
       end
 
-      class Exit
+      class Shutdown
         def start
           Logger.log "Closing connection to #{@socket.peeraddr[2]}"
-          Logger.log "Shutting down... (#{NOW})"
+          Logger.log "Shutting down... (#{::Hubeye::Server::NOW})"
           Logger.log ""
           Logger.log ""
           @socket.puts("Shutting down server")
@@ -271,10 +343,10 @@ class Hubeye
       class SaveRepo
         def start
           if !@session.tracker.empty?
-            File.open("#{ENV['HOME']}/.hubeye/repos/#{$matches[1]}.yml", "w") do |f_out|
+            File.open("#{ENV['HOME']}/.hubeye/repos/#{@matches[1]}.yml", "w") do |f_out|
               ::YAML.dump(@session.tracker, f_out)
             end
-            @socket.puts("Saved repo #{$matches[0]} as #{$matches[1]}")
+            @socket.puts("Saved repo #{@matches[0]} as #{@matches[1]}")
           else
             @socket.puts("No remote repos are being tracked")
           end
@@ -283,7 +355,7 @@ class Hubeye
 
       class LoadHook
         def start
-          hookfile = "#{ENV['HOME']}/.hubeye/hooks/#{$matches[1]}.yml"
+          hookfile = "#{ENV['HOME']}/.hubeye/hooks/#{@matches[1]}.yml"
           newhooks = nil
           if File.exists?(hookfile)
             File.open(hookfile) do |f|
@@ -291,9 +363,9 @@ class Hubeye
             end
             @hooks ||= {}
             @hooks = newhooks.merge(@session.hooks)
-            @socket.puts("Loaded #{$matches[0]} #{$matches[1]}")
+            @socket.puts("Loaded #{@matches[0]} #{@matches[1]}")
           else
-            @socket.puts("No #{$matches[0]} file to load from")
+            @socket.puts("No #{@matches[0]} file to load from")
           end
         end
       end
@@ -306,18 +378,18 @@ class Hubeye
               newrepos = ::YAML.load(f)
             end
             if !newrepos
-              @socket.puts "Unable to load #{$matches[1]}: empty file"
-              throw(:next)
+              @socket.puts "Unable to load #{@matches[1]}: empty file"
+              return
             end
             # newrepos is an array of repos to be tracked
             newrepos.each do |e|
-              # append the repo name and the commit hash to the hubeye tracker
+              # add the repo name and the commit hash to the hubeye tracker
               # array, then inform the client of the newest commit message
               username, repo = e.split '/'
               gh_user = User.find(username)
               gh_repo = gh_user.repository repo
               new_commit = gh_repo.commits.first
-              @session.tracker.append_or_replace!(e, new_commit)
+              @session.tracker.add_or_replace!(e, new_commit)
             end
             @socket.puts "Loaded #{$2}.\nTracking:\n#{@session.tracker.join ', '}"
           else
@@ -333,13 +405,13 @@ class Hubeye
         # related to hooks called on change of commit message (with plans to change
         # that to commit SHA reference) of the remote repo
         def start
-          if $matches[0] != nil && $matches[3] != nil
-            if @session.hooks[$matches[0]]
-              @session.hooks[$matches[0]] << $matches[3]
+          if @matches[0] != nil && @matches[3] != nil
+            if @session.hooks[@matches[0]]
+              @session.hooks[@matches[0]] << @matches[3]
             elsif $matches[1] != nil
-              @session.hooks[$matches[0]] = [ $matches[2], $matches[3] ]
+              @session.hooks[@matches[0]] = [ @matches[2], @matches[3] ]
             else
-              @session.hooks[$matches[0]] = [$matches[3]]
+              @session.hooks[@matches[0]] = [@matches[3]]
             end
             @socket.puts("Hook added")
           else
@@ -375,7 +447,8 @@ class Hubeye
 
       class ListTracking
         def start
-          list = @session.tracker.join ', '
+          list = @session.tracker.keys.join ', '
+          list = "none" if list.empty?
           @socket.puts(list)
         end
       end
@@ -388,10 +461,10 @@ class Hubeye
 
       class RmRepo
         def start
-          if $matches[0].include?("/")
-            @session.username, @session.repo_name = $matches[0].split('/')
+          if @matches[1].include?("/")
+            @session.username, @session.repo_name = @matches[1].split('/')
           else
-            @session.repo_name = @input
+            @session.repo_name = @matches[1]
           end
           rm = @session.tracker.delete("#{@session.username}/#{@session.repo_name}")
           if rm
@@ -407,7 +480,6 @@ class Hubeye
           if @options and @options[:pwd]
             @session.repo_name = File.dirname(File.expand_path('.'))
           elsif @options and @options[:fullpath]
-            # includes a '/', such as rails/rails, but in the adding to tracker context
             @session.username, @session.repo_name = @input.split('/')
           else
             @session.repo_name = @input
@@ -418,34 +490,39 @@ class Hubeye
         private
         def add_repo
           @full_repo_name = "#{@session.username}/#{@session.repo_name}"
+          hist = nil
+          # developer api v3
           begin
-            gh_user = ::Hubeye::Server::User.find(:username => @session.username)
-            gh_repo = gh_user.repository @session.repo_name
-          rescue ArgumentError, Octopi::NotFound
+            open "https://api.github.com/repos/#{@session.username}/" \
+            "#{@session.repo_name}/commits" do |f|
+              hist = JSON.parse f.read
+            end
+          rescue
             @socket.puts "Not a Github repository name"
             return
           end
-          new_commit = gh_repo.commits.first
-          change_status = @session.tracker.append_or_replace!(@full_repo_name, new_commit)
+          new_sha = hist.first['sha']
+          change = @session.tracker.add_or_replace!(@full_repo_name, new_sha)
           # get commit info
-          commit_msg = new_commit.message
-          committer  = new_commit.author['name']
-          url = "https://www.github.com#{new_commit.url[0..-30]}"
-          msg =  "#{commit_msg}\n=> #{committer}"
+          first = hist.first
+          commit_msg = first['commit']['message']
+          committer  = first['commit']['committer']['name']
+          url = first['url'][0..-30]
+          msg = "#{commit_msg}\n=> #{committer}"
           # new repo to track
-          if change_status[:add]
+          if !change
+            @socket.puts("Repository #{@full_repo_name} has not changed")
+            return
+          elsif change[:add]
             # log the fact that the user added a repo to be tracked
-            Logger.log("Added to tracker: #{@full_repo_name} (#{NOW})")
+            Logger.log("Added to tracker: #{@full_repo_name} (#{::Hubeye::Server::NOW})")
             # show the user, via the client, the info and commit msg for the commit
             @socket.puts("#{msg}\n#{url}")
-
-            # new commit to tracked repo
-          elsif change_status[:replace]
+          elsif change[:replace]
             change_msg = "New commit on #{@full_repo_name}\n"
             change_msg << "#{msg}\n#{url}"
             @socket.puts(change_msg)
             begin
-              # log to the logfile and tell the client
               if @daemonized
                 Logger.log_change(@full_repo_name, commit_msg, committer)
               else
@@ -453,11 +530,8 @@ class Hubeye
                                   :include_terminal => true)
               end
             rescue
-              throw :next
+              return
             end
-          else
-            # no change to the tracked repo
-            @socket.puts("Repository #{@full_repo_name} has not changed")
           end
         end
       end
@@ -478,25 +552,20 @@ class Hubeye
         %r{\Atracking\s*\Z} => lambda {|m, s| ListTracking.new(m, s)},
         %r{^pwd} => lambda {|m, s| AddRepo.new(m, s, :pwd => true)},
         %r{^\s*$} => lambda {|m, s| Next.new(m, s)},
-        %r{\Arm ([\w-](\/)?[\w-]*)\Z} => lambda {|m, s| RmRepo.new(m, s)},
-        lambda {|inp| inp.include? 'diiv'} => lambda {|m, s| AddRepo.new(m, s, :fullpath => true)},
+        %r{\Arm ([\w-]+/?[\w-]*)\Z} => lambda {|m, s| RmRepo.new(m, s)},
+        lambda {|inp| inp.include? '/'} => lambda {|m, s| AddRepo.new(m, s, :fullpath => true)},
         lambda {|inp| not inp.nil?} => lambda {|m, s| AddRepo.new(m, s)}
       }
 
       def call
-        # input, strategy hash
         STRATEGIES.each do |inp,strat|
           if Regexp === inp
             if m = @input.match(inp)
-              return strat.call(m, @server)
-            else
-              next
+              return strat.call(m, self)
             end
           elsif Proc === inp
             if m = inp.call(@input)
-              return strat.call(m, @server)
-            else
-              next
+              return strat.call(m, self)
             end
           end
         end
@@ -506,13 +575,14 @@ class Hubeye
 
       STRATEGY_CLASSES.each do |klass|
         klass.class_eval do
-          def initialize matches, server, options={}
-            @options = options unless options.empty?
-            @matches = matches
-            @server = server
-            @socket = @server.socket
-            @sockets = @server.sockets
-            @session = @server.session
+          def initialize matches, strategy, options={}
+            @options  = options unless options.empty?
+            @matches  = matches
+            @server   = strategy.server
+            @socket   = @server.socket
+            @sockets  = @server.sockets
+            @session  = @server.session
+            @input    = strategy.input
             start
           end
         end

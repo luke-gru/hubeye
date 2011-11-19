@@ -1,4 +1,4 @@
-task :install => :chmod do
+task :install_complete => :chmod do
   puts "Done"
 end
 
