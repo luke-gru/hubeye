@@ -13,8 +13,7 @@ class Hubeye
           while line = f.gets
             line = line.strip
             next if line.empty?
-            user_opts = line.split(':')
-            user_opts.map! {|o| o.strip }
+            user_opts = line.split(':').map! {|o| o.strip}
             case user_opts[0]
             when "username"
               @username = user_opts[1]
