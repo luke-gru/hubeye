@@ -190,6 +190,7 @@ class Hubeye
             File.open(hookfile) do |f|
               new_hooks = ::YAML.load(f)
             end
+            p new_hooks
             @session.hooks.merge!(new_hooks)
             unless @silent
               @socket.puts("Loaded #{@matches[1]} #{@matches[2]}")
@@ -232,18 +233,30 @@ class Hubeye
 
       class AddHook
         def call
-          if @matches[1] != nil and @matches[4] != nil
-            if @session.hooks[@matches[1]]
-              if @matches[3]
-                @session.hooks[@matches[1]].merge!({@matches[3] => @matches[4]})
+          cwd  = File.expand_path('.')
+          repo = @matches[1]
+          dir  = @matches[3]
+          cmd  = @matches[4]
+          if repo != nil and cmd != nil
+            if @session.hooks[repo]
+              if dir
+                if @session.hooks[repo][dir]
+                  @session.hooks[repo][dir] << cmd
+                else
+                  @session.hooks[repo][dir] = [cmd]
+                end
               else
-                @session.hooks[@matches[1]][nil] << @matches[4]
+                if @session.hooks[repo][cwd]
+                  @session.hooks[repo][cwd] << cmd
+                else
+                  @session.hooks[repo][cwd] = [cmd]
+                end
               end
             else
-              if @matches[3]
-                @session.hooks[@matches[1]] = {@matches[3] => @matches[4]}
+              if dir
+                @session.hooks[repo] = {dir => [cmd]}
               else
-                @session.hooks[@matches[1]] = {nil => [@matches[4]]}
+                @session.hooks[repo] = {cwd => [cmd]}
               end
             end
             @socket.puts("Hook added")
@@ -374,7 +387,7 @@ EOS
         end
       end
 
-      # {|matches, basestrategy| SomeStrategy.new(matches, basestrategy)}
+      # lambda {|matchdata, basestrategy| SomeStrategy.new(matchdata, basestrategy)}
       STRATEGIES = {
         %r{\Ashutdown\Z} => lambda {|m, s| Shutdown.new(m, s)},
         %r{\Aquit|exit\Z} => lambda {|m, s| Exit.new(m, s)},
@@ -538,6 +551,7 @@ EOS
       opts = {:hooks => nil, :repos => nil}.merge options
       if hooks = opts[:hooks]
         hooks.each do |h|
+          p h
           strat = Strategy.new(self, :internal_input => "internal load hook #{h}")
           strat.call
         end
