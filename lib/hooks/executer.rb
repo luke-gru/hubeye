@@ -5,7 +5,7 @@ module Hooks
 
       #options include the directory to execute the command
       #(that's it for now, will add more functionality later)
-      def self.execute(commands=[], options={})
+      def self.execute(commands, options={})
         opts = {:directory => nil, :repo => nil}.merge(options)
         dir  = opts[:directory]
         repo = opts[:repo]

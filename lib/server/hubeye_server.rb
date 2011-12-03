@@ -65,13 +65,13 @@ class Hubeye
       attr_accessor :input
 
       def initialize(server, options={})
+        self.server = server
         opts = {:internal_input => nil}.merge options
         if !opts[:internal_input]
           self.input = server.socket.gets
         else
           self.input = opts[:internal_input]
         end
-        self.server = server
         unless @input
           Logger.log "Client on #{@server.socket.peeraddr[2]} disconnected."
           @server.sockets.delete(socket)
@@ -190,7 +190,6 @@ class Hubeye
             File.open(hookfile) do |f|
               new_hooks = ::YAML.load(f)
             end
-            p new_hooks
             @session.hooks.merge!(new_hooks)
             unless @silent
               @socket.puts("Loaded #{@matches[1]} #{@matches[2]}")
@@ -470,7 +469,7 @@ EOS
                 ret = {:add => true}
               end
             end
-            self[repo_name] = new_sha
+            self.merge! repo_name => new_sha
             ret
           end
         end
@@ -494,7 +493,6 @@ EOS
 
     # options: :sha, :latest, :full (all boolean)
     def track(repo, options={})
-      opts = {:sha => true}.merge options
       if repo.include? '/'
         username, repo_name = repo.split '/'
         full_repo_name = repo
@@ -512,12 +510,12 @@ EOS
         @socket.puts "Not a Github repository name"
         return
       end
-      if opts[:sha]
-        {full_repo_name => hist.first['sha']}
-      elsif opts[:latest]
+      if options[:full]
+        {full_repo_name => hist}
+      elsif options[:latest]
         {full_repo_name => hist.first}
       else
-        {full_repo_name => hist}
+        {full_repo_name => hist.first['sha']}
       end
     end
 
@@ -551,7 +549,6 @@ EOS
       opts = {:hooks => nil, :repos => nil}.merge options
       if hooks = opts[:hooks]
         hooks.each do |h|
-          p h
           strat = Strategy.new(self, :internal_input => "internal load hook #{h}")
           strat.call
         end
@@ -585,8 +582,9 @@ EOS
             else
               # There was a change to a tracked repository.
               full_repo_name = new_info.keys.first
-              commit_msg     = new_info['commit']['message']
-              committer      = new_info['commit']['committer']['name']
+              commit_msg     = new_info[full_repo_name]['commit']['message']
+              committer      = new_info[full_repo_name]['commit']['committer']['name']
+              new_sha        = new_info[full_repo_name]['sha']
               change_msg = "Repo #{full_repo_name} has changed\nNew commit: " \
                 "#{commit_msg}\n=> #{committer}"
               case CONFIG[:desktop_notification]
@@ -605,24 +603,31 @@ EOS
               end
               # execute any hooks for that repository
               unless @session.hooks.nil? || @session.hooks.empty?
-                if @session.hooks[full_repo_name]
-                  hook_cmds = @session.hooks[full_repo_name].dup
-                  dir = (hook_cmds.include?('/') ? hook_cmds.shift : nil)
-                  # execute() takes [commands], {options} where
-                  # options = :directory and :repo
-                  Hooks::Command.execute(hook_cmds, :directory => dir, :repo => repo)
+                if hooks = @session.hooks[full_repo_name]
+                  hooks = hooks.dup
+                  hooks.each do |dir,cmds|
+                    # execute() takes [commands], {options} where
+                    # options = :directory and :repo
+                    Hooks::Command.execute(cmds, :directory => dir, :repo => full_repo_name)
+                  end
                 end
               end
-              @session.tracker.add_or_replace!(full_repo_name, new_commit)
+              @session.tracker.add_or_replace!(full_repo_name, new_sha)
             end
           end
-          redo unless @remote_connection
         end # end of (while remote_connection == false)
+      else
+        @remote_connection = client_ready(@sockets, :block => true) ? true : false
+        throw(:connect, true) if @remote_connection
       end
     end
 
-    def client_ready(sockets)
-      select(sockets, nil, nil, 1)
+    def client_ready(sockets, options={})
+      if options[:block]
+        select(sockets, nil, nil)
+      else
+        select(sockets, nil, nil, 1)
+      end
     end
 
     def client_connect(sockets)
