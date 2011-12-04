@@ -37,14 +37,14 @@ class Options
     options.server_wanted = true
     options.client_wanted = false
     options.server_daemonized = true
-    options.port = 2000
+    options.port = 4545
     options.host = 'localhost'
 
     opts_saved = OptionParser.new do |opts|
       opts.banner = "Usage: hubeye [options]"
       opts.separator ""
       opts.separator "Specific options:"
-      opts.separator "Note: The default port (for server and client) is 2000"
+      opts.separator "Note: The default port (for server and client) is 4545"
 
       opts.on("-s", "--server", "Start the server (default: daemonized process)") do
         options.client_wanted = false
@@ -127,7 +127,7 @@ class Hubeye
       server.start(port, options)
     end
 
-    # client connection defaults to localhost:2000
+    # client connection defaults to localhost:4545
     def start_client(host, port)
       client = HubeyeClient.new
       client.start(host, port)

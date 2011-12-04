@@ -27,7 +27,7 @@ class Hubeye
       elsif @latest
         @commit_message ||= @raw_input[@repo]['commit']['message']
       else
-        raise StandardError.new
+        raise
       end
     end
 
@@ -37,14 +37,14 @@ class Hubeye
       elsif @latest
         @committer_name ||= @raw_input[@repo]['commit']['committer']['name']
       else
-        raise StandardError.new
+        raise
       end
     end
   end
 
   module Server
     attr_accessor :remote_connection
-    attr_reader :socket, :sockets, :session
+    attr_reader :socket, :sockets, :session, :daemonized
 
     # standard lib.
     require 'socket'
@@ -103,18 +103,16 @@ class Hubeye
 
     class Strategy
       UnknownStrategy = Class.new(StandardError)
-
-      attr_accessor :server
-      attr_accessor :input
+      attr_reader :server, :input
 
       def initialize(server, options={})
-        self.server = server
+        @server = server
         opts = {:internal_input => nil}.merge options
         if !opts[:internal_input]
-          self.input = server.socket.gets
+          @input = server.socket.gets
           @input.chop!
         else
-          self.input = opts[:internal_input]
+          @input = opts[:internal_input]
         end
         unless @input
           Logger.log "Client on #{@server.socket.peeraddr[2]} disconnected."
@@ -133,7 +131,7 @@ class Hubeye
 
       STRATEGY_CLASSES.each do |klass_str|
         binding.eval "class #{klass_str}; end"
-        klass = self.const_get klass_str.intern
+        klass = const_get klass_str.intern
         klass.class_eval do
           def initialize matches, strategy, options={}
             @options  = options
@@ -152,6 +150,8 @@ class Hubeye
       class Exit
         def call
           @socket.puts "Bye!"
+          # mark the session as continuous to not wipe the log file
+          @session.continuous = true
           Logger.log "Closing connection to #{@socket.peeraddr[2]}"
           @server.remote_connection = false
           if !@session.tracker.empty?
@@ -173,6 +173,9 @@ class Hubeye
           @socket.puts("Shutting down server")
           @sockets.delete(@socket)
           @socket.close
+          unless @server.daemonized
+            STDOUT.puts "Shutdown gracefully."
+          end
           exit 0
         end
       end
@@ -418,21 +421,23 @@ EOS
             change_msg = "New commit on #{full_repo_name}\n"
             change_msg << msg
             @socket.puts(change_msg)
-            begin
-              if @server.daemonized
-                Logger.log_change(full_repo_name, commit_msg, committer)
-              else
-                Logger.log_change(full_repo_name, commit_msg, committer,
-                                  :include_terminal => true)
-              end
-            rescue
-              return
+            if @server.daemonized
+              Logger.log_change(full_repo_name, commit_msg, committer)
+            else
+              Logger.log_change(full_repo_name, commit_msg, committer,
+                                :include_terminal => true)
             end
           end
         end
       end
 
-      # lambda {|matchdata, basestrategy| SomeStrategy.new(matchdata, basestrategy)}
+      # STRATEGIES hash
+      # ===============
+      # keys: input matches
+      # OR
+      # lambda {|input| input.something?} => value
+      #
+      # values: lambda {|matchdata, basestrategy| SomeStrategy.new(matchdata, basestrategy)}
       STRATEGIES = {
         %r{\Ashutdown\Z} => lambda {|m, s| Shutdown.new(m, s)},
         %r{\Aquit|exit\Z} => lambda {|m, s| Exit.new(m, s)},
@@ -470,8 +475,8 @@ EOS
     end
 
     class Session
-      attr_writer :tracker, :repo_name, :username, :hooks
-      attr_reader :repo_name, :username
+      attr_accessor :repo_name, :username, :continuous
+      attr_writer :tracker, :hooks
 
       def initialize
         setup_singleton_methods
@@ -485,7 +490,7 @@ EOS
         @hooks ||= {}
       end
 
-      def reset
+      def cleanup
         reset_username
         reset_repo_name
       end
@@ -503,7 +508,7 @@ EOS
         tracker.singleton_class.class_eval do
           def add_or_replace! repo_name, new_sha=nil
             if Hash === repo_name
-              self.merge! repo_name
+              merge! repo_name
               return true
             else
               if keys.include? repo_name and self[repo_name] == new_sha
@@ -514,7 +519,7 @@ EOS
                 ret = {:add => true}
               end
             end
-            self.merge! repo_name => new_sha
+            merge! repo_name => new_sha
             ret
           end
         end
@@ -531,14 +536,17 @@ EOS
         client_connect(@sockets) if waiting
         strategy = Strategy.new(self)
         strategy.call
-        @session.reset
+        @session.cleanup
       end
     end
 
-    # the track method closes over this list to store recent info on
-    # tracked repositories
+    # The track method closes over a list variable to store recent info on
+    # tracked repositories.
+    # Options: :sha, :latest, :full, :list (all boolean).
+    # The :list => true option gives back the commit object from the list.
+
     list = []
-    # options: :sha, :latest, :full (all boolean), :list
+
     define_method :track do |repo, options={}|
       if repo.include? '/'
         username, repo_name = repo.split '/'
@@ -596,9 +604,10 @@ EOS
       @sockets = [@server]  # An array of sockets we'll monitor
       @session = Session.new
       unless CONFIG[:default_track].nil?
-        newly_tracked = {}
-        CONFIG[:default_track].each {|repo| newly_tracked.merge! track(repo)}
-        @session.tracker.merge! newly_tracked
+        CONFIG[:default_track].each do |repo|
+          commit = track(repo)
+          @session.tracker.merge! commit.repo => commit.sha
+        end
       end
       unless CONFIG[:load_hooks].empty?
         hooks = CONFIG[:load_hooks].dup
@@ -707,7 +716,7 @@ EOS
           # Inform the client of connection
           basic_inform = "Hubeye running on #{Socket.gethostname} as #{@session.username}"
           if !@session.tracker.empty?
-            @socket.puts "#{basic_inform}\nTracking:#{@session.tracker.keys.join ', '}"
+            @socket.puts "#{basic_inform}\nTracking: #{@session.tracker.keys.join ', '}"
           else
             @socket.puts basic_inform
           end
@@ -716,8 +725,8 @@ EOS
           end
           @socket.flush
           # And log the fact that the client connected
-          if @still_logging == true
-            # if the client quit, do not wipe the log file
+          # if the client quit, do not wipe the log file
+          if @session.continuous
             Logger.log "Accepted connection from #{@socket.peeraddr[2]} (#{NOW})"
           else
             # wipe the log file and start anew
@@ -728,7 +737,6 @@ EOS
         end
       end
     end
-
 
   end # of Server module
 

@@ -37,6 +37,7 @@ class HubeyeClient
     end
 
     private
+
     def _begin
       begin
         yield
@@ -50,12 +51,12 @@ class HubeyeClient
     @debug = debug
     conn = Connection.new(host, port)
     conn.receive_welcome
-    interact(conn)
+    interact(conn.s)
   end
 
   # Now begin a loop of client/server interaction.
-  def interact(conn)
-    @s = conn.s
+  def interact(socket)
+    @s = socket
     while @s
       loop do
         STDOUT.print '> '

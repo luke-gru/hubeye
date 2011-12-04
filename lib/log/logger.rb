@@ -1,5 +1,5 @@
 class Logger
-  LOG_DIR = ENV['HOME'] + "/.hubeye/log"
+  LOG_DIR = File.join(ENV['HOME'], '.hubeye', 'log')
 
   def self.log(msg)
     File.open(LOG_DIR, "a") do |f|
@@ -29,7 +29,7 @@ class Logger
     if opts[:include_terminal]
       STDOUT.puts change_msg
     end
-    Logger.log(change_msg)
+    log(change_msg)
   end
 
 end
