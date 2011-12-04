@@ -1,5 +1,9 @@
 module Notification
 
+  dir =  File.dirname(__FILE__)
+  CHANGE_ICON      = "change_icon.jpg"
+  CHANGE_ICON_PATH = File.expand_path(File.join(dir, "..", "images", CHANGE_ICON))
+
   class Finder
 
     def self.find_notify
@@ -46,7 +50,7 @@ module Notification
           end
         end
         if defined? Autotest
-          return true
+          true
         end
       end
 
@@ -62,7 +66,7 @@ module Notification
           end
         end
         if defined? Autotest
-          return true
+          true
         end
       end
     end

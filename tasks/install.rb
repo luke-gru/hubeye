@@ -1,36 +1,28 @@
-task :install_complete => :chmod do
+HUBEYE_ROOT_DIR  = File.join(ENV['HOME'], '.hubeye')
+HUBEYE_REPOS_DIR = File.join(HUBEYE_ROOT_DIR, 'repos')
+HUBEYE_HOOKS_DIR = File.join(HUBEYE_ROOT_DIR, 'hooks')
+HUBEYE_LOG_FILE  = File.join(HUBEYE_ROOT_DIR, 'log')
+HUBEYE_CONF_FILE = File.join(HUBEYE_ROOT_DIR, 'hubeyerc')
+
+task :install => :create_config_file do
   puts "Done"
 end
 
-task :chmod => :config_file do
-  binfile = File.join(File.expand_path(File.dirname(__FILE__) + '/..'), "/bin/hubeye")
-  chmod 0777, binfile unless File.executable?(binfile)
+task :create_config_file do
+  touch HUBEYE_CONF_FILE unless File.exists? HUBEYE_CONF_FILE
 end
 
-task :config_file do
-  config_file = File.join(ENV['HOME'], "/.hubeye/hubeyerc")
-  touch config_file unless File.exists? config_file
+task :create_config_file => :make_log
+
+task :make_log => :message do
+  mkdir HUBEYE_ROOT_DIR  unless File.exists? HUBEYE_ROOT_DIR
+  mkdir HUBEYE_HOOKS_DIR unless File.exists? HUBEYE_HOOKS_DIR
+  mkdir HUBEYE_REPOS_DIR unless File.exists? HUBEYE_REPOS_DIR
+
+  touch HUBEYE_LOG_FILE unless File.exists?  HUBEYE_LOG_FILE
 end
-
-task :config_file => :makelog
-
-task :makelog => :message do
-  hubeye_dir  =  ENV['HOME'] + "/.hubeye"
-  mkdir(hubeye_dir) unless File.exists?(hubeye_dir)
-
-  hooks_dir = hubeye_dir + "/hooks"
-  mkdir(hooks_dir) unless File.exists?(hooks_dir)
-
-  repos_dir = hubeye_dir + "/repos"
-  mkdir(repos_dir) unless File.exists?(repos_dir)
-
-  hubeye_log_file =  File.join(ENV['HOME'], "/.hubeye/log")
-  touch hubeye_log_file unless File.exists?(hubeye_log_file)
-end
-
-
 
 task :message do
-  puts "Installing Hubeye..."
+  puts "Installing hubeye..."
 end
 

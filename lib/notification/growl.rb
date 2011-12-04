@@ -1,11 +1,12 @@
-module Autotest::Growl
+module Autotest
+  module Growl
 
-  EXPIRATION_IN_SECONDS = 2
-  dir =  File.dirname(__FILE__)
-  CHANGE_ICON = File.expand_path(dir + "/../images/change_icon.jpg")
+    EXPIRATION_IN_SECONDS = 2
+    IMG = ::Notification::CHANGE_ICON_PATH
 
-  def self.growl(title, msg, img=CHANGE_ICON, pri=0, stick="")
-    system "growlnotify  -n autotest --image #{img} -p #{pri} -m #{msg.inspect} #{title} #{stick}"
+    def self.growl(title, msg, img=IMG, pri=0, stick="")
+      system "growlnotify  -n autotest --image #{img} -p #{pri} -m #{msg.inspect} #{title} #{stick}"
+    end
+
   end
-
 end

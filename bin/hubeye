@@ -9,24 +9,11 @@ require File.join(ROOTDIR, 'VERSION')
 require 'optparse'
 require 'ostruct'
 
-unless File.exists? ENV['HOME'] + '/.hubeye'
+unless File.exists?(File.join(ENV['HOME'],'.hubeye'))
   require 'rake'
-  require 'stringio'
-
-  def capture_stdout
-    s = StringIO.new
-    oldstdout = $stdout
-    $stdout = s
-    yield
-    s.string
-  ensure
-    $stdout = oldstdout
-  end
 
   require File.join(ROOTDIR, 'tasks/install')
-  # Don't display the results
-  results = capture_stdout { Rake.application['install'].invoke }
-
+  Rake.application['install'].invoke
 end
 
 class Options
@@ -99,10 +86,12 @@ class Hubeye
           puts "Other instances are running"
           exit 1
         end
-        require File.join(LIBDIR, '/server/hubeye_server')
-        options.server_daemonized ? start_server(port, :daemon => true) : start_server(port, :daemon => false)
+        require File.join(LIBDIR, 'server', 'hubeye_server')
+        options.server_daemonized ?
+          start_server(port, :daemon => true) :
+          start_server(port, :daemon => false)
       else
-        require File.join(LIBDIR, '/client/hubeye_client')
+        require File.join(LIBDIR, 'client', 'hubeye_client')
         start_client(host, port)
       end
     end
