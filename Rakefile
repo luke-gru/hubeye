@@ -15,3 +15,4 @@ task :version do
   require_relative 'VERSION'
   puts Hubeye::VERSION * '.'
 end
+

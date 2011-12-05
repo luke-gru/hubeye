@@ -1,5 +1,6 @@
 module Log
   class Logger
+
     LOG_DIR = File.join(ENV['HOME'], '.hubeye', 'log')
 
     def self.log(msg)
@@ -17,7 +18,6 @@ module Log
 
     # If {include_terminal: true}, log to the terminal too (make sure that the
     # process is not daemonized). Always log to the logfile.
-
     def self.log_change(repo_name, commit_msg, committer, options={})
       opts = {:include_terminal => false}.merge options
       change_msg = <<-MSG
@@ -35,3 +35,4 @@ module Log
 
   end
 end
+

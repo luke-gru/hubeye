@@ -1,6 +1,5 @@
 class EnvironmentTests < Test::Unit::TestCase
-
-  include ::Environment
+  include Environment
 
   def test_proper_rootdir
     assert_equal File.expand_path(File.dirname(__FILE__) + '/..'), ROOTDIR

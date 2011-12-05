@@ -1,6 +1,5 @@
 module Hooks
   module Git
-
     module Default
 
       def self.fetch(local_reponame, remotename, branchname)
@@ -16,6 +15,6 @@ module Hooks
       end
 
     end
-
   end
 end
+

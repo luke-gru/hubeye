@@ -8,7 +8,7 @@ require 'test/unit'
 
 # test files
 require_relative 'environment'
-require File.join(File.expand_path(File.dirname(__FILE__) + '/..'), "lib/notification/notification")
+require File.join(File.expand_path(File.dirname(__FILE__) + '/..'), "lib/notification/finder")
 require_relative "notification"
 require Environment::LIBDIR + '/config/parser'
 require_relative "config_parser"

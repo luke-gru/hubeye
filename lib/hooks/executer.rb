@@ -10,17 +10,15 @@ module Hooks
         dir  = opts[:directory]
         repo = opts[:repo]
         begin
-
-        commands.each do |cmd|
-          if dir
-            Dir.chdir(File.expand_path(dir)) do
+          commands.each do |cmd|
+            if dir
+              Dir.chdir(File.expand_path(dir)) do
+                ::Kernel.system cmd
+              end
+            else
               ::Kernel.system cmd
             end
-          else
-            ::Kernel.system cmd
           end
-        end
-
         rescue ArgumentError
           raise NoHookError.new "There aren't any hook commands for the repository #{repo}"
         end
@@ -28,3 +26,4 @@ module Hooks
 
   end
 end
+

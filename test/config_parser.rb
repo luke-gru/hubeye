@@ -134,7 +134,6 @@ class ConfigParserTests < Test::Unit::TestCase
     assert_equal ['myforks', 'myprojects', 'mywork'], @repos
     assert_equal ['myhook1', 'myhook2', 'captain_hook'], @hooks
     assert_equal 'hansolo', @username
-
   end
 
 end
