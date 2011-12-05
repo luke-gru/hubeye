@@ -3,3 +3,4 @@ module Helpers
     NOW = ::Time.now.strftime("%m/%d/%Y at %I:%M%p")
   end
 end
+

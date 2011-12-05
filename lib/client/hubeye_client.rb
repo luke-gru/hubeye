@@ -42,7 +42,7 @@ class HubeyeClient
       begin
         yield
       rescue
-        puts $! if @debug
+        @debug ? puts($!) : nil
       end
     end
   end
@@ -63,13 +63,14 @@ class HubeyeClient
         STDOUT.flush
         local = STDIN.gets
         begin
-          if local.match(/^\.$/) # '.' = pwd
-            # Send the line to the server, daemons gem strips some special chars (/, :)
-            @s.puts(local.gsub(/\A\.\Z/, "pwd" + Dir.pwd.split('/').last))
+          if local.match(/^\.$/) # '.' = pwd (of client process)
+            @s.puts local.gsub(/\A\.\Z/, File.split(File.expand_path('.')).last)
           else
-            @s.puts(local.gsub(/\//, 'diiv'))
+            @s.puts local.gsub(/\//, 'diiv')
           end
-        rescue Errno::EPIPE
+        rescue
+          # Errno::EPIPE for broken pipes in Unix (server got an ^C or
+          # something like that)
           exit 1
         end
         @s.flush
@@ -82,7 +83,7 @@ class HubeyeClient
         begin
           response = @s.readpartial(4096)
         rescue EOFError
-          response = "Bye!"
+          response = "Bye!\n"
         end
         if response.chop.strip == "Bye!"
           puts response.chop

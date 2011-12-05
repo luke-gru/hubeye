@@ -8,3 +8,4 @@ BINDIR = File.join(ROOTDIR, "bin")
 $:.unshift(LIBDIR) unless $:.include? LIBDIR
 
 end
+

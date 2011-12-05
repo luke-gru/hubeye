@@ -72,7 +72,6 @@ class Options
 
 end # end of class
 
-
 class Hubeye
   class << self
 

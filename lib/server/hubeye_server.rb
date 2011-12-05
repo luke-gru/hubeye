@@ -121,12 +121,6 @@ class Hubeye
         else
           @input = opts[:internal_input]
         end
-        unless @input
-          Logger.log "Client on #{@server.socket.peeraddr[2]} disconnected."
-          @server.sockets.delete(socket)
-          @server.socket.close
-          return
-        end
         @input = @input.strip.downcase
         @input.gsub! /diiv/, '/'
       end
@@ -134,7 +128,6 @@ class Hubeye
       STRATEGY_CLASSES = [ "Shutdown", "Exit", "SaveHook", "SaveRepo",
         "LoadHook", "LoadRepo", "AddHook", "ListHooks", "ListTracking",
         "Next", "RmRepo", "AddRepo" ]
-
 
       STRATEGY_CLASSES.each do |klass_str|
         binding.eval "class #{klass_str}; end"
@@ -164,7 +157,6 @@ class Hubeye
           if !@session.tracker.empty?
             Logger.log "Tracking: #{@session.tracker.keys.join ', '}"
           end
-          # to look pretty when multiple connections per loop
           Logger.log ""
           @sockets.delete(@socket)
           @socket.close
@@ -233,8 +225,8 @@ class Hubeye
 
       class LoadHook
         def call
-          if @options[:internal]
-            @silent = @options[:internal]
+          if _t = @options[:internal]
+            @silent = _t
           end
           hookfile = "#{ENV['HOME']}/.hubeye/hooks/#{@matches[2]}.yml"
           new_hooks = nil
@@ -256,8 +248,8 @@ class Hubeye
 
       class LoadRepo
         def call
-          if @options[:internal]
-            @silent = @options[:internal]
+          if _t = @options[:internal]
+            @silent = _t
           end
           if File.exists?(repo_file = "#{ENV['HOME']}/.hubeye/repos/#{@matches[2]}.yml")
             new_repos = nil
@@ -284,42 +276,34 @@ class Hubeye
 
       class AddHook
         def call
-          cwd  = File.expand_path('.')
-          repo = @matches[1]
-          dir  = @matches[3]
-          cmd  = @matches[4]
-          if repo != nil and cmd != nil
-            if @session.hooks[repo]
-              if dir
-                if @session.hooks[repo][dir]
-                  @session.hooks[repo][dir] << cmd
-                else
-                  @session.hooks[repo][dir] = [cmd]
-                end
-              else
-                if @session.hooks[repo][cwd]
-                  @session.hooks[repo][cwd] << cmd
-                else
-                  @session.hooks[repo][cwd] = [cmd]
-                end
-              end
-            else
-              if dir
-                @session.hooks[repo] = {dir => [cmd]}
-              else
-                @session.hooks[repo] = {cwd => [cmd]}
-              end
-            end
-            @socket.puts("Hook added")
-          else
-            @socket.puts("Format: 'hook add user/repo [dir: /my/dir/repo ] cmd: git pull origin'")
+          cwd   = File.expand_path('.')
+          repo  = @matches[1]
+          _dir  = @matches[3]
+          cmd   = @matches[4]
+          hooks = @session[hooks]
+          if repo.nil? and cmd.nil?
+            @socket.puts("Format: 'hook add user/repo [dir: /my/dir/repo ] cmd: some_cmd'")
+            return
           end
+          if hooks[repo]
+            _dir ? dir = _dir : dir = cwd
+            if hooks[repo][dir]
+              hooks[repo][dir] << cmd
+            else
+              hooks[repo][dir] = [cmd]
+            end
+          elsif _dir
+            hooks[repo] = {dir => [cmd]}
+          else
+            hooks[repo] = {cwd => [cmd]}
+          end
+          @socket.puts("Hook added")
         end
       end
 
       class ListHooks
         def call
-          unless @session.hooks.empty?
+          if !@session.hooks.empty?
             pwd = File.expand_path('.')
             format_string = ""
             @session.hooks.each do |repo, hash|
@@ -513,20 +497,22 @@ EOS
 
       def setup_singleton_methods
         tracker.singleton_class.class_eval do
-          def add_or_replace! repo_name, new_sha=nil
-            if Hash === repo_name
-              merge! repo_name
-              return true
+          def add_or_replace! input, new_sha=nil
+            if Hash === input and new_sha.nil?
+              repo = input.keys.first
+              hash = true
             else
-              if keys.include? repo_name and self[repo_name] == new_sha
-                return
-              elsif keys.include? repo_name
-                ret = {:replace => true}
-              else
-                ret = {:add => true}
-              end
+              repo = input
+              two_args = true
             end
-            merge! repo_name => new_sha
+            if keys.include? repo and self[repo] == new_sha
+              return
+            elsif keys.include? repo
+              ret = {:replace => true}
+            else
+              ret = {:add => true}
+            end
+            two_args ? merge!(repo => new_sha) : merge!(input)
             ret
           end
         end
@@ -549,11 +535,11 @@ EOS
       end
     end
 
+    #TODO: refactor this into its own class. Getting unwieldy
     # The track method closes over a list variable to store recent info on
     # tracked repositories.
     # Options: :sha, :latest, :full, :list (all boolean).
     # The :list => true option gives back the commit object from the list.
-
     list = []
 
     define_method :track do |repo, options={}|
@@ -598,7 +584,6 @@ EOS
         list.each {|c| return c if c.repo == full_repo_name}
         nil
       else
-        # default
         Commit.new full_repo_name => {'sha' => hist.first['sha']}
       end
     end
@@ -611,18 +596,13 @@ EOS
     def setup_env(options={})
       @daemonized = options[:daemon]
       @sockets = [@server]  # An array of sockets we'll monitor
-      ['INT', 'KILL'].each do |sig|
-        trap(sig) do
-          @sockets.each {|s| s.close}
-          STDOUT.puts
-          exit 1
-        end
-      end
       @session = Session.new
+      trap_signals 'INT', 'KILL'
       unless CONFIG[:default_track].nil?
-        CONFIG[:default_track].each do |repo|
+        repos = CONFIG[:default_track].dup
+        repos.each do |repo|
           commit = track(repo)
-          @session.tracker.merge! commit.repo => commit.sha
+          @session.tracker.add_or_replace! commit.repo => commit.sha
         end
       end
       unless CONFIG[:load_hooks].empty?
@@ -635,6 +615,16 @@ EOS
       end
       @session.username = CONFIG[:username]
       @remote_connection = false
+    end
+
+    def trap_signals *sigs
+      sigs.each do |sig|
+        trap(sig) do
+          @sockets.each {|s| s.close}
+          STDOUT.puts
+          exit 1
+        end
+      end
     end
 
     def session_load options={}
@@ -656,9 +646,8 @@ EOS
 
     #TODO: refactor this ugly, long method into a new class
     def look_for_changes
-      # if no client is connected, but the commits array contains repos
+      # if no client is connected, and the tracker hash is non-empty
       if @sockets.size == 1 and !@session.tracker.empty?
-
         loop do
           sleep_amt = CONFIG[:oncearound] / @session.tracker.length
           @session.tracker.each do |repo,sha|
@@ -682,23 +671,20 @@ EOS
               case CONFIG[:desktop_notification]
               when "libnotify"
                 Notification::GnomeNotify.notify("Hubeye", change_msg)
-                Logger.log_change(full_repo_name, commit_msg, committer)
               when "growl"
                 Autotest::Growl.growl("Hubeye", change_msg)
-                Logger.log_change(full_repo_name, commit_msg, committer)
               when nil
-                if @daemonized
-                  Logger.log_change(full_repo_name, commit_msg, committer)
-                else
+                unless @daemonized
                   Logger.log_change(full_repo_name, commit_msg, committer, :include_terminal => true)
+                  already_logged = true
                 end
               end
+              Logger.log_change(full_repo_name, commit_msg, committer) unless
+                already_logged
               # execute any hooks for that repository
-              unless @session.hooks.nil? || @session.hooks.empty?
+              unless @session.hooks.empty?
                 if hooks = @session.hooks[full_repo_name]
                   hooks.each do |dir,cmds|
-                    # execute() takes [commands], {options} where
-                    # options = :directory and :repo
                     Hooks::Command.execute(cmds, :directory => dir, :repo => full_repo_name)
                   end
                 end
@@ -706,7 +692,7 @@ EOS
               @session.tracker.add_or_replace!(full_repo_name, new_sha)
             end
           end
-        end # end of (while remote_connection == false)
+        end # end of loop
       else
         @remote_connection = client_ready(@sockets, :block => true) ? true : false
         throw(:connect, true) if @remote_connection
@@ -739,12 +725,10 @@ EOS
             puts "Client connected at #{NOW}"
           end
           @socket.flush
-          # And log the fact that the client connected
-          # if the client quit, do not wipe the log file
           if @session.continuous
             Logger.log "Accepted connection from #{@socket.peeraddr[2]} (#{NOW})"
           else
-            # wipe the log file and start anew
+            # wipe the log file and start fresh
             Logger.relog "Accepted connection from #{@socket.peeraddr[2]} (#{NOW})"
           end
           Logger.log "local:  #{@socket.addr}"
