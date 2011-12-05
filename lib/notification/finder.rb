@@ -1,8 +1,8 @@
 module Notification
+  include Environment
 
-  dir =  File.dirname(__FILE__)
   CHANGE_ICON      = "change_icon.jpg"
-  CHANGE_ICON_PATH = File.expand_path(File.join(dir, "..", "images", CHANGE_ICON))
+  CHANGE_ICON_PATH = (File.join(ROOTDIR, "images", CHANGE_ICON))
 
   class Finder
 

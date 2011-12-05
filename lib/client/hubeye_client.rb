@@ -62,11 +62,15 @@ class HubeyeClient
         STDOUT.print '> '
         STDOUT.flush
         local = STDIN.gets
-        if local.match(/^\.$/) # '.' = pwd
-          # Send the line to the server, daemons gem strips some special chars (/, :)
-          @s.puts(local.gsub(/\A\.\Z/, "pwd" + Dir.pwd.split('/').last))
-        else
-          @s.puts(local.gsub(/\//, 'diiv'))
+        begin
+          if local.match(/^\.$/) # '.' = pwd
+            # Send the line to the server, daemons gem strips some special chars (/, :)
+            @s.puts(local.gsub(/\A\.\Z/, "pwd" + Dir.pwd.split('/').last))
+          else
+            @s.puts(local.gsub(/\//, 'diiv'))
+          end
+        rescue Errno::EPIPE
+          exit 1
         end
         @s.flush
         if local =~ /load repo/
@@ -80,7 +84,6 @@ class HubeyeClient
         rescue EOFError
           response = "Bye!"
         end
-
         if response.chop.strip == "Bye!"
           puts response.chop
           @s.close

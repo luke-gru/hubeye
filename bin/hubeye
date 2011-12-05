@@ -12,7 +12,7 @@ require 'ostruct'
 unless File.exists?(File.join(ENV['HOME'],'.hubeye'))
   require 'rake'
 
-  require File.join(ROOTDIR, 'tasks/install')
+  require File.join(ROOTDIR, 'tasks', 'install')
   Rake.application['install'].invoke
 end
 
@@ -83,7 +83,7 @@ class Hubeye
       daemonized = options.server_daemonized
       if options.server_wanted
         unless port_open?(port)
-          puts "Other instances are running"
+          puts "A service is already running on this port"
           exit 1
         end
         require File.join(LIBDIR, 'server', 'hubeye_server')
@@ -91,22 +91,23 @@ class Hubeye
           start_server(port, :daemon => true) :
           start_server(port, :daemon => false)
       else
+        ['INT', 'KILL'].each do |sig|
+          trap(sig) { STDOUT.puts; exit 1 }
+        end
         require File.join(LIBDIR, 'client', 'hubeye_client')
         start_client(host, port)
       end
     end
 
-
     def port_open?(port)
-      # this is the solution until multi-threading or forking is implemented
-      # on the TCP server
+      # will change this to a more platform-agnostic method, like
+      # rescuing busy port exceptions.
       listening_tcps = `netstat -l --tcp --numeric`
       if /#{port}/ =~ listening_tcps
         return false
       end
       true
     end
-
 
     def start_server(port, options={})
       server = HubeyeServer.new(true) # debug: true

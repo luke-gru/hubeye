@@ -1,3 +1,6 @@
+require "log/logger"
+include Log
+
 class Hubeye
 
   # simple interface to Github's api v3 for commits
@@ -53,14 +56,13 @@ class Hubeye
     require 'open-uri'
     # hubeye
     require "config/parser"
-    require "log/logger"
-    require "notification/notification"
+    require "notification/finder"
     require "hooks/git_hooks"
     require "hooks/executer"
     require "helpers/time"
     include Helpers::Time
 
-    CONFIG_FILE = ENV['HOME'] + "/.hubeye/hubeyerc"
+    CONFIG_FILE = File.join(ENV['HOME'], ".hubeye", "hubeyerc")
     CONFIG = {}
     # find Desktop notification system
 
@@ -110,6 +112,11 @@ class Hubeye
         opts = {:internal_input => nil}.merge options
         if !opts[:internal_input]
           @input = server.socket.gets
+          # check if the client pressed ^C or ^D
+          if @input.nil?
+            @server.remote_connection = false
+            throw(:invalid_input)
+          end
           @input.chop!
         else
           @input = opts[:internal_input]
@@ -174,7 +181,7 @@ class Hubeye
           @sockets.delete(@socket)
           @socket.close
           unless @server.daemonized
-            STDOUT.puts "Shutdown gracefully."
+            STDOUT.puts "Shutting down gracefully."
           end
           exit 0
         end
@@ -534,8 +541,10 @@ EOS
           look_for_changes unless @remote_connection
         end
         client_connect(@sockets) if waiting
-        strategy = Strategy.new(self)
-        strategy.call
+        catch(:invalid_input) do
+          strategy = Strategy.new(self)
+          strategy.call
+        end
         @session.cleanup
       end
     end
@@ -564,7 +573,7 @@ EOS
           end
         rescue
           @socket.puts "Not a Github repository name"
-          return
+          throw(:invalid_input)
         end
         new_info =
           {full_repo_name =>
@@ -602,6 +611,13 @@ EOS
     def setup_env(options={})
       @daemonized = options[:daemon]
       @sockets = [@server]  # An array of sockets we'll monitor
+      ['INT', 'KILL'].each do |sig|
+        trap(sig) do
+          @sockets.each {|s| s.close}
+          STDOUT.puts
+          exit 1
+        end
+      end
       @session = Session.new
       unless CONFIG[:default_track].nil?
         CONFIG[:default_track].each do |repo|
@@ -665,7 +681,7 @@ EOS
                 "#{commit_msg}\n=> #{committer}"
               case CONFIG[:desktop_notification]
               when "libnotify"
-                Autotest::GnomeNotify.notify("Hubeye", change_msg)
+                Notification::GnomeNotify.notify("Hubeye", change_msg)
                 Logger.log_change(full_repo_name, commit_msg, committer)
               when "growl"
                 Autotest::Growl.growl("Hubeye", change_msg)
@@ -680,7 +696,6 @@ EOS
               # execute any hooks for that repository
               unless @session.hooks.nil? || @session.hooks.empty?
                 if hooks = @session.hooks[full_repo_name]
-                  hooks = hooks.dup
                   hooks.each do |dir,cmds|
                     # execute() takes [commands], {options} where
                     # options = :directory and :repo

@@ -1,6 +1,4 @@
-# require_relative doesn't work for gemspecs
 require File.join(File.dirname(__FILE__), 'VERSION')
-
 require 'rake'
 
 summary = <<SUMMARY
