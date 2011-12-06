@@ -17,6 +17,8 @@ unless File.exists?(File.join(ENV['HOME'],'.hubeye'))
 end
 
 class Options
+  DEFAULT_PORT = 4545
+
   def self.parse(args)
 
     # defaults
@@ -24,25 +26,27 @@ class Options
     options.server_wanted = true
     options.client_wanted = false
     options.server_daemonized = true
-    options.port = 4545
+    options.port = DEFAULT_PORT
     options.host = 'localhost'
 
     opts_saved = OptionParser.new do |opts|
       opts.banner = "Usage: hubeye [options]"
       opts.separator ""
+      opts.separator "Note: The default port (for server and client) is #{DEFAULT_PORT}"
+      opts.separator "      The default host (for server and client) is localhost"
+      opts.separator ""
       opts.separator "Specific options:"
-      opts.separator "Note: The default port (for server and client) is 4545"
 
-      opts.on("-s", "--server", "Start the server (default: daemonized process)") do
+      opts.on("-s", "--server", "Start the server (default: daemonized)") do
         options.client_wanted = false
         options.server_wanted = true
       end
 
-      opts.on("-t", "--top", "Run server as non-daemonized (output to term)") do
+      opts.on("-t", "--top", "Run server process in terminal") do
         options.server_daemonized = false
       end
 
-      opts.on("-o", "--host HOST", "Host that the client connects to. Default: 'localhost'") do |h|
+      opts.on("-o", "--host HOST", "Host that the server runs on / client connects to") do |h|
         options.host = h
       end
 
@@ -50,7 +54,7 @@ class Options
         options.port = p.to_i
       end
 
-      opts.on("-c", "--client", "Start hubeye client to interact with server.") do
+      opts.on("-c", "--client", "Start hubeye client to interact with server") do
         options.server_wanted = false
         options.client_wanted = true
       end
@@ -116,7 +120,6 @@ class Hubeye
       server.start(port, options)
     end
 
-    # client connection defaults to localhost:4545
     def start_client(host, port)
       client = HubeyeClient.new
       client.start(host, port)

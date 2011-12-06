@@ -65,7 +65,6 @@ class Hubeye
 
     CONFIG_FILE = File.join(ENV['HOME'], ".hubeye", "hubeyerc")
     CONFIG = {}
-    # find Desktop notification system
 
     # CONFIG options: defined in ~/.hubeye/hubeyerc
     #
@@ -149,13 +148,14 @@ class Hubeye
       class Exit
         def call
           socket = server.socket
+          session = server.session
           socket.puts "Bye!"
           # mark the session as continuous to not wipe the log file
-          server.session.continuous = true
+          session.continuous = true
           Logger.log "Closing connection to #{socket.peeraddr[2]}"
           server.remote_connection = false
-          if !server.session.tracker.empty?
-            Logger.log "Tracking: #{server.session.tracker.keys.join ', '}"
+          unless session.tracker.empty?
+            Logger.log "Tracking: #{session.tracker.keys.join ', '}"
           end
           Logger.log ""
           server.sockets.delete(socket)
@@ -313,31 +313,31 @@ class Hubeye
         def call
           socket = server.socket
           hooks = server.session.hooks
-          if !hooks.empty?
-            pwd = File.expand_path('.')
-            format_string = ""
-            hooks.each do |repo, hash|
-              local_dir = nil
-              command = nil
-              hash.each do |dir,cmd|
-                if dir.nil?
-                  local_dir = pwd
-                  command = cmd.join("\n" + (' ' * 8))
-                else
-                  command = cmd
-                  local_dir = dir
-                end
+          if hooks.empty?
+            socket.puts("No hooks")
+            return
+          end
+          pwd = File.expand_path('.')
+          format_string = ""
+          hooks.each do |repo, hash|
+            local_dir = nil
+            command = nil
+            hash.each do |dir,cmd|
+              if dir.nil?
+                local_dir = pwd
+                command = cmd.join("\n" + (' ' * 8))
+              else
+                command = cmd
+                local_dir = dir
               end
-              format_string << <<EOS
+            end
+            format_string << <<EOS
 remote: #{repo}
 dir:    #{local_dir}
 cmds:   #{command}\n
 EOS
-            end
-            socket.puts(format_string)
-          else
-            socket.puts("No hooks")
           end
+          socket.puts(format_string)
         end
       end
 
@@ -395,9 +395,7 @@ EOS
       class AddRepo
         def call
           session = server.session
-          if @options and @options[:pwd]
-            session.repo_name = File.dirname(File.expand_path('.'))
-          elsif @options and @options[:fullpath]
+          if @options and @options[:fullpath]
             session.username, session.repo_name = input.split('/')
           else
             session.repo_name = input
@@ -449,6 +447,8 @@ EOS
       STRATEGIES = {
         %r{\Ashutdown\Z} => lambda {|m, s| Shutdown.new(m, s)},
         %r{\Aquit|exit\Z} => lambda {|m, s| Exit.new(m, s)},
+        %r{\Atracking\s*\Z} => lambda {|m, s| ListTracking.new(m, s)},
+        %r{\Atracking\s*-d\Z} => lambda {|m, s| ListTracking.new(m, s, :details => true)},
         %r{\A\s*save hook(s?) as (.+)\Z} => lambda {|m, s| SaveHook.new(m, s)},
         %r{\A\s*save repo(s?) as (.+)\Z} => lambda {|m, s| SaveRepo.new(m, s)},
         %r{\A\s*load hook(s?) (.+)\Z} => lambda {|m, s| LoadHook.new(m, s)},
@@ -457,9 +457,6 @@ EOS
         %r{\A\s*internal load repo(s?) (.+)\Z} => lambda {|m, s| LoadRepo.new(m, s, :internal => true)},
         %r{\Ahook add ([-\w]+/[-\w]+) (dir:\s?(.*))?\s*cmd:\s?(.*)\Z} => lambda {|m, s| AddHook.new(m, s)},
         %r{\Ahook list\Z} => lambda {|m, s| ListHooks.new(m, s)},
-        %r{\Atracking\s*\Z} => lambda {|m, s| ListTracking.new(m, s)},
-        %r{\Atracking\s*-d\Z} => lambda {|m, s| ListTracking.new(m, s, :details => true)},
-        %r{^pwd} => lambda {|m, s| AddRepo.new(m, s, :pwd => true)},
         %r{^\s*$} => lambda {|m, s| Next.new(m, s)},
         %r{\Arm ([-\w]+/?[-\w]*)\Z} => lambda {|m, s| RmRepo.new(m, s)},
         lambda {|inp| inp.include? '/'} => lambda {|m, s| AddRepo.new(m, s, :fullpath => true)},
@@ -552,7 +549,7 @@ EOS
       end
     end
 
-    #TODO: refactor this into its own class. Getting unwieldy
+    #TODO: refactor this into its own class. Getting unwieldy.
     # The track method closes over a list variable to store recent info on
     # tracked repositories.
     # Options: :sha, :latest, :full, :list (all boolean).
@@ -738,9 +735,7 @@ EOS
           else
             @socket.puts basic_inform
           end
-          if !@daemonized
-            puts "Client connected at #{NOW}"
-          end
+          puts "Client connected at #{NOW}" unless @daemonized
           @socket.flush
           if @session.continuous
             Logger.log "Accepted connection from #{@socket.peeraddr[2]} (#{NOW})"

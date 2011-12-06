@@ -20,13 +20,13 @@ module Log
     # process is not daemonized). Always log to the logfile.
     def self.log_change(repo_name, commit_msg, committer, options={})
       opts = {:include_terminal => false}.merge options
-      change_msg = <<-MSG
-      ===============================
-      Repository: #{repo_name.downcase.strip} has changed (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})
-      Commit msg: #{commit_msg}
-      Committer : #{committer}
-      ===============================
-      MSG
+      change_msg = <<MSG
+===============================
+Repository: #{repo_name.downcase.strip} has changed (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})
+Commit msg: #{commit_msg}
+Committer : #{committer}
+===============================
+MSG
       if opts[:include_terminal]
         STDOUT.puts change_msg
       end
