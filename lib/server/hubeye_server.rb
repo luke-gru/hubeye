@@ -54,6 +54,7 @@ class Hubeye
     require 'yaml'
     require 'json'
     require 'open-uri'
+    require 'forwardable'
     # hubeye
     require "config/parser"
     require "notification/finder"
@@ -133,14 +134,12 @@ class Hubeye
         binding.eval "class #{klass_str}; end"
         klass = const_get klass_str.intern
         klass.class_eval do
+          extend Forwardable
+          def_delegators :@strategy, :input, :server
           def initialize matches, strategy, options={}
-            @options  = options
             @matches  = matches
-            @server   = strategy.server
-            @input    = strategy.input
-            @socket   = @server.socket
-            @sockets  = @server.sockets
-            @session  = @server.session
+            @strategy = strategy
+            @options  = options
             call
           end
         end
@@ -149,30 +148,32 @@ class Hubeye
       # strategy classes
       class Exit
         def call
-          @socket.puts "Bye!"
+          socket = server.socket
+          socket.puts "Bye!"
           # mark the session as continuous to not wipe the log file
-          @session.continuous = true
-          Logger.log "Closing connection to #{@socket.peeraddr[2]}"
-          @server.remote_connection = false
-          if !@session.tracker.empty?
-            Logger.log "Tracking: #{@session.tracker.keys.join ', '}"
+          server.session.continuous = true
+          Logger.log "Closing connection to #{socket.peeraddr[2]}"
+          server.remote_connection = false
+          if !server.session.tracker.empty?
+            Logger.log "Tracking: #{server.session.tracker.keys.join ', '}"
           end
           Logger.log ""
-          @sockets.delete(@socket)
-          @socket.close
+          server.sockets.delete(socket)
+          socket.close
         end
       end
 
       class Shutdown
         def call
-          Logger.log "Closing connection to #{@socket.peeraddr[2]}"
+          socket = server.socket
+          Logger.log "Closing connection to #{socket.peeraddr[2]}"
           Logger.log "Shutting down... (#{::Hubeye::Server::NOW})"
           Logger.log ""
           Logger.log ""
-          @socket.puts("Shutting down server")
-          @sockets.delete(@socket)
-          @socket.close
-          unless @server.daemonized
+          socket.puts("Shutting down server")
+          server.sockets.delete(socket)
+          socket.close
+          unless server.daemonized
             STDOUT.puts "Shutting down gracefully."
           end
           exit 0
@@ -181,7 +182,8 @@ class Hubeye
 
       class SaveHook
         def call
-          hooks = @session.hooks
+          socket = server.socket
+          hooks = server.session.hooks
           if !hooks.empty?
             file = "#{ENV['HOME']}/.hubeye/hooks/#{@matches[2]}.yml"
             if File.exists? file
@@ -190,9 +192,9 @@ class Hubeye
             File.open(file, "w") do |f_out|
               ::YAML.dump(hooks, f_out)
             end
-            @socket.puts("Saved hook#{@matches[1]} as #{@matches[2]}")
+            socket.puts("Saved hook#{@matches[1]} as #{@matches[2]}")
           else
-            @socket.puts("No hook#{@matches[1]} to save")
+            socket.puts("No hook#{@matches[1]} to save")
           end
         end
 
@@ -203,18 +205,19 @@ class Hubeye
 
       class SaveRepo
         def call
-          if !@session.tracker.empty?
+          socket = server.socket
+          if !server.session.tracker.empty?
             file = "#{ENV['HOME']}/.hubeye/repos/#{@matches[2]}.yml"
             if File.exists? file
               override?
             end
             # dump only the repository names, not the shas
             File.open(file, "w") do |f_out|
-              ::YAML.dump(@session.tracker.keys, f_out)
+              ::YAML.dump(server.session.tracker.keys, f_out)
             end
-            @socket.puts("Saved repo#{@matches[1]} as #{@matches[2]}")
+            socket.puts("Saved repo#{@matches[1]} as #{@matches[2]}")
           else
-            @socket.puts("No remote repos are being tracked")
+            socket.puts("No remote repos are being tracked")
           end
         end
 
@@ -225,6 +228,7 @@ class Hubeye
 
       class LoadHook
         def call
+          socket = server.socket
           if _t = @options[:internal]
             @silent = _t
           end
@@ -234,13 +238,15 @@ class Hubeye
             File.open(hookfile) do |f|
               new_hooks = ::YAML.load(f)
             end
-            @session.hooks.merge!(new_hooks)
+            # need to fix this to check if there are already commands for that
+            # repo
+            server.session.hooks.merge!(new_hooks)
             unless @silent
-              @socket.puts("Loaded #{@matches[1]} #{@matches[2]}")
+              socket.puts("Loaded #{@matches[1]} #{@matches[2]}")
             end
           else
             unless @silent
-              @socket.puts("No #{@matches[1]} file to load from")
+              socket.puts("No #{@matches[1]} file to load from")
             end
           end
         end
@@ -248,6 +254,7 @@ class Hubeye
 
       class LoadRepo
         def call
+          socket = server.socket
           if _t = @options[:internal]
             @silent = _t
           end
@@ -257,32 +264,33 @@ class Hubeye
               new_repos = ::YAML.load(f)
             end
             if !new_repos
-              @socket.puts "Unable to load #{@matches[2]}: empty file" unless @silent
+              socket.puts "Unable to load #{@matches[2]}: empty file" unless @silent
               return
             end
             new_repos.each do |r|
               # add the repo name to the hubeye tracker
-              commit = @server.track(r)
-              @session.tracker.add_or_replace!(commit.repo, commit.sha)
+              commit = server.track(r)
+              server.session.tracker.add_or_replace!(commit.repo, commit.sha)
             end
             unless @silent
-              @socket.puts "Loaded #{@matches[2]}.\nTracking:\n#{@session.tracker.keys.join ', '}"
+              socket.puts "Loaded #{@matches[2]}.\nTracking:\n#{server.session.tracker.keys.join ', '}"
             end
           else
-            @socket.puts("No file to load from") unless @silent
+            socket.puts("No file to load from") unless @silent
           end
         end
       end
 
       class AddHook
         def call
+          socket = server.socket
           cwd   = File.expand_path('.')
           repo  = @matches[1]
           _dir  = @matches[3]
           cmd   = @matches[4]
-          hooks = @session[hooks]
+          hooks = server.session.hooks
           if repo.nil? and cmd.nil?
-            @socket.puts("Format: 'hook add user/repo [dir: /my/dir/repo ] cmd: some_cmd'")
+            socket.puts("Format: 'hook add user/repo [dir: /my/dir/repo ] cmd: some_cmd'")
             return
           end
           if hooks[repo]
@@ -297,16 +305,18 @@ class Hubeye
           else
             hooks[repo] = {cwd => [cmd]}
           end
-          @socket.puts("Hook added")
+          socket.puts("Hook added")
         end
       end
 
       class ListHooks
         def call
-          if !@session.hooks.empty?
+          socket = server.socket
+          hooks = server.session.hooks
+          if !hooks.empty?
             pwd = File.expand_path('.')
             format_string = ""
-            @session.hooks.each do |repo, hash|
+            hooks.each do |repo, hash|
               local_dir = nil
               command = nil
               hash.each do |dir,cmd|
@@ -324,20 +334,22 @@ dir:    #{local_dir}
 cmds:   #{command}\n
 EOS
             end
-            @socket.puts(format_string)
+            socket.puts(format_string)
           else
-            @socket.puts("No hooks")
+            socket.puts("No hooks")
           end
         end
       end
 
       class ListTracking
         def call
+          socket = server.socket
+          tracker = server.session.tracker
           output = ''
           if @options[:details]
             commit_list = []
-            @session.tracker.keys.each do |repo|
-              commit = @server.track(repo, :list => true)
+            tracker.keys.each do |repo|
+              commit = server.track(repo, :list => true)
               commit_list << commit
             end
             commit_list.each do |c|
@@ -349,70 +361,75 @@ EOS
               output << "\n" unless c.repo == commit_list.last.repo
             end
           else
-            output << @session.tracker.keys.join(', ')
+            output << tracker.keys.join(', ')
           end
           output = "none" if output.empty?
-          @socket.puts(output)
+          socket.puts(output)
         end
       end
 
       class Next
         def call
-          @socket.puts("")
+          server.socket.puts("")
         end
       end
 
       class RmRepo
         def call
+          socket = server.socket
+          session = server.session
           if @matches[1].include?("/")
-            @session.username, @session.repo_name = @matches[1].split('/')
+            session.username, session.repo_name = @matches[1].split('/')
           else
-            @session.repo_name = @matches[1]
+            session.repo_name = @matches[1]
           end
-          rm = @session.tracker.delete("#{@session.username}/#{@session.repo_name}")
+          rm = session.tracker.delete("#{session.username}/#{session.repo_name}")
           if rm
-            @socket.puts("Stopped watching repository #{@session.username}/#{@session.repo_name}")
+            socket.puts("Stopped watching repository #{session.username}/#{session.repo_name}")
           else
-            @socket.puts("Repository #{@session.username}/#{@session.repo_name} not currently being watched")
+            socket.puts("Repository #{session.username}/#{session.repo_name} not currently being watched")
           end
         end
       end
 
       class AddRepo
         def call
+          session = server.session
           if @options and @options[:pwd]
-            @session.repo_name = File.dirname(File.expand_path('.'))
+            session.repo_name = File.dirname(File.expand_path('.'))
           elsif @options and @options[:fullpath]
-            @session.username, @session.repo_name = @input.split('/')
+            session.username, session.repo_name = input.split('/')
           else
-            @session.repo_name = @input
+            session.repo_name = input
           end
           add_repo
         end
 
         private
         def add_repo
-          full_repo_name = "#{@session.username}/#{@session.repo_name}"
-          commit = @server.track(full_repo_name, :latest => true)
+          socket = server.socket
+          session = server.session
+          full_repo_name = "#{session.username}/#{session.repo_name}"
+          commit = server.track(full_repo_name, :latest => true)
           new_sha = commit.sha
           commit_msg = commit.commit_message
           committer  = commit.committer_name
           msg = "#{commit_msg}\n=> #{committer}"
-          change = @session.tracker.add_or_replace!(full_repo_name, new_sha)
+          change = session.tracker.add_or_replace!(full_repo_name, new_sha)
           # new repo to track
           if !change
-            @socket.puts("Repository #{full_repo_name} has not changed")
+            socket.puts("Repository #{full_repo_name} has not changed")
             return
           elsif change[:add]
             # log the fact that the user added a repo to be tracked
             Logger.log("Added to tracker: #{full_repo_name} (#{::Hubeye::Server::NOW})")
             # show the user, via the client, the info and commit msg for the commit
-            @socket.puts(msg)
+            socket.puts(msg)
           elsif change[:replace]
             change_msg = "New commit on #{full_repo_name}\n"
             change_msg << msg
-            @socket.puts(change_msg)
-            if @server.daemonized
+            socket.puts(change_msg)
+            if server.daemonized
               Logger.log_change(full_repo_name, commit_msg, committer)
             else
               Logger.log_change(full_repo_name, commit_msg, committer,
