@@ -28,7 +28,8 @@ class Hubeye
       if @only_sha
         return
       elsif @latest
-        @commit_message ||= @raw_input[@repo]['commit']['message']
+        @commit_message ||=
+          @raw_input[@repo]['commit']['message']
       else
         raise
       end
@@ -38,7 +39,8 @@ class Hubeye
       if @only_sha
         return
       elsif @latest
-        @committer_name ||= @raw_input[@repo]['commit']['committer']['name']
+        @committer_name ||=
+          @raw_input[@repo]['commit']['committer']['name']
       else
         raise
       end
@@ -87,11 +89,11 @@ class Hubeye
     # would track https://www.github.com/rails/rails
     Config::Parser.new(CONFIG_FILE) do |c|
       CONFIG[:username]       = c.username ||
-        `git config --get-regexp github`.split(' ').last
+        `git config --get-regexp github`.split(' ').last || ''
       CONFIG[:oncearound]     = c.oncearound || 60
       CONFIG[:load_repos]     = c.load_repos || []
       CONFIG[:load_hooks]     = c.load_hooks || []
-      CONFIG[:default_track]  = c.default_track || nil
+      CONFIG[:default_track]  = c.default_track || []
 
       CONFIG[:notification_wanted] = if c.notification_wanted.nil?
                                        true
@@ -100,18 +102,23 @@ class Hubeye
                                      end
     end
 
-    CONFIG[:desktop_notification] = Notification::Finder.find_notify if
-    CONFIG[:notification_wanted]
+    if CONFIG[:notification_wanted]
+      CONFIG[:desktop_notification] =
+        Notification::Finder.find_notify
+    end
 
     class Strategy
       UnknownStrategy = Class.new(StandardError)
+
       attr_reader :server, :input
+      extend Forwardable
+      def_delegator :@server, :socket
 
       def initialize(server, options={})
         @server = server
         opts = {:internal_input => nil}.merge options
         if !opts[:internal_input]
-          @input = server.socket.gets
+          @input = socket.gets
           # check if the client pressed ^C or ^D
           if @input.nil?
             @server.remote_connection = false
@@ -300,10 +307,9 @@ class Hubeye
             else
               hooks[repo][dir] = [cmd]
             end
-          elsif _dir
-            hooks[repo] = {dir => [cmd]}
           else
-            hooks[repo] = {cwd => [cmd]}
+            dir = _dir || cwd
+            hooks[repo] = {dir => [cmd]}
           end
           socket.puts("Hook added")
         end
@@ -355,7 +361,7 @@ EOS
             commit_list.each do |c|
               output << c.repo + "\n"
               underline = '=' * c.repo.length
-              output << underline + "\n"
+              output << underline + "\n\n"
               output << c.commit_message + "\n=> " +
                 c.committer_name + "\n"
               output << "\n" unless c.repo == commit_list.last.repo
@@ -376,18 +382,22 @@ EOS
 
       class RmRepo
         def call
-          socket = server.socket
+          socket  = server.socket
           session = server.session
-          if @matches[1].include?("/")
-            session.username, session.repo_name = @matches[1].split('/')
+          username  = session.username
+          repo_name = session.repo_name
+          m1 = @matches[1]
+          if m1.include?('/')
+            username, repo_name = m1.split('/')
           else
-            session.repo_name = @matches[1]
+            repo_name = m1
           end
-          rm = session.tracker.delete("#{session.username}/#{session.repo_name}")
+          full_repo_name = "#{username}/#{repo_name}"
+          rm = session.tracker.delete(full_repo_name)
           if rm
-            socket.puts("Stopped watching repository #{session.username}/#{session.repo_name}")
+            socket.puts("Stopped watching repository #{full_repo_name}")
           else
-            socket.puts("Repository #{session.username}/#{session.repo_name} not currently being watched")
+            socket.puts("Repository #{full_repo_name} not currently being watched")
           end
         end
       end
@@ -608,11 +618,13 @@ EOS
     end
 
     def setup_env(options={})
+      @remote_connection = false
       @daemonized = options[:daemon]
       @sockets = [@server]  # An array of sockets we'll monitor
-      @session = Session.new
       trap_signals 'INT', 'KILL'
-      unless CONFIG[:default_track].nil?
+      @session = Session.new
+      @session.username = CONFIG[:username]
+      unless CONFIG[:default_track].empty?
         repos = CONFIG[:default_track].dup
         repos.each do |repo|
           commit = track(repo)
@@ -627,8 +639,6 @@ EOS
         repos = CONFIG[:load_repos].dup
         session_load :repos => repos
       end
-      @session.username = CONFIG[:username]
-      @remote_connection = false
     end
 
     def trap_signals *sigs
