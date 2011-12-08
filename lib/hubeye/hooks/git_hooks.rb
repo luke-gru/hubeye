@@ -1,5 +1,5 @@
-module Hooks
-  module Git
+module Hubeye
+  module Hooks
     module Default
 
       def self.fetch(local_reponame, remotename, branchname)
@@ -17,4 +17,3 @@ module Hooks
     end
   end
 end
-

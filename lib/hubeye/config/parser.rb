@@ -1,4 +1,4 @@
-class Hubeye
+module Hubeye
   module Config
     class Parser
 

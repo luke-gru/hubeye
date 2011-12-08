@@ -1,82 +1,82 @@
 #!/usr/bin/env ruby
 
-# require environment and VERSION files
-require File.join(File.expand_path(File.dirname(__FILE__) + "/../"), "lib/environment")
-include Environment
-require File.join(ROOTDIR, 'VERSION')
+module Hubeye
 
-# standard lib
-require 'optparse'
-require 'ostruct'
+  # require environment and VERSION files
+  require File.join(File.expand_path(File.dirname(__FILE__) + "/../"), "lib/hubeye/config/environment")
+  include Environment
+  require File.join(ROOTDIR, 'VERSION')
 
-unless File.exists?(File.join(ENV['HOME'],'.hubeye'))
-  require 'rake'
+  # standard lib
+  require 'optparse'
+  require 'ostruct'
 
-  require File.join(ROOTDIR, 'tasks', 'install')
-  Rake.application['install'].invoke
-end
+  unless File.exists?(File.join(ENV['HOME'],'.hubeye'))
+    require 'rake'
+    require File.join(ROOTDIR, 'tasks', 'install')
+    Rake.application['install'].invoke
+  end
 
-class Options
-  DEFAULT_PORT = 4545
+  class Options
+    DEFAULT_PORT = 4545
 
-  def self.parse(args)
+    def self.parse(args)
 
-    # defaults
-    options = OpenStruct.new
-    options.server_wanted = true
-    options.client_wanted = false
-    options.server_daemonized = true
-    options.port = DEFAULT_PORT
-    options.host = 'localhost'
+      # defaults
+      options = OpenStruct.new
+      options.server_wanted = true
+      options.client_wanted = false
+      options.server_daemonized = true
+      options.port = DEFAULT_PORT
+      options.host = 'localhost'
 
-    opts_saved = OptionParser.new do |opts|
-      opts.banner = "Usage: hubeye [options]"
-      opts.separator ""
-      opts.separator "Note: The default port (for server and client) is #{DEFAULT_PORT}"
-      opts.separator "      The default host (for server and client) is localhost"
-      opts.separator ""
-      opts.separator "Specific options:"
+      opts_saved = OptionParser.new do |opts|
+        opts.banner = "Usage: hubeye [options]"
+        opts.separator ""
+        opts.separator "Note: The default port (for server and client) is #{DEFAULT_PORT}"
+        opts.separator "      The default host (for server and client) is localhost"
+        opts.separator ""
+        opts.separator "Specific options:"
 
-      opts.on("-s", "--server", "Start the server (default: daemonized)") do
-        options.client_wanted = false
-        options.server_wanted = true
+        opts.on("-s", "--server", "Start the server (default: daemonized)") do
+          options.client_wanted = false
+          options.server_wanted = true
+        end
+
+        opts.on("-t", "--top", "Run server process in terminal") do
+          options.server_daemonized = false
+        end
+
+        opts.on("-o", "--host HOST", "Host that the server runs on / client connects to") do |h|
+          options.host = h
+        end
+
+        opts.on("-p", "--port PORT", "Port that the server runs on / client connects to") do |p|
+          options.port = p.to_i
+        end
+
+        opts.on("-c", "--client", "Start hubeye client to interact with server") do
+          options.server_wanted = false
+          options.client_wanted = true
+        end
+
+        opts.on_tail("-v", "--version", "Show hubeye version") do
+          puts VERSION.join('.')
+          exit
+        end
+
+        opts.on_tail("-h", "--help", "Show this message") do
+          puts opts
+          exit
+        end
       end
 
-      opts.on("-t", "--top", "Run server process in terminal") do
-        options.server_daemonized = false
-      end
+      opts_saved.parse!(args)
+      options
+    end # end of Options::parse
 
-      opts.on("-o", "--host HOST", "Host that the server runs on / client connects to") do |h|
-        options.host = h
-      end
+  end # end of class
 
-      opts.on("-p", "--port PORT", "Port that the server runs on / client connects to") do |p|
-        options.port = p.to_i
-      end
-
-      opts.on("-c", "--client", "Start hubeye client to interact with server") do
-        options.server_wanted = false
-        options.client_wanted = true
-      end
-
-      opts.on_tail("-v", "--version", "Show hubeye version") do
-        puts Hubeye::VERSION.join('.')
-        exit
-      end
-
-      opts.on_tail("-h", "--help", "Show this message") do
-        puts opts
-        exit
-      end
-    end
-
-    opts_saved.parse!(args)
-    options
-  end # end of Options::parse
-
-end # end of class
-
-class Hubeye
   class << self
 
     def start
@@ -89,7 +89,7 @@ class Hubeye
           puts "A service is already running on this port"
           exit 1
         end
-        require File.join(LIBDIR, 'server', 'hubeye_server')
+        require File.join('hubeye', 'server', 'hubeye_server')
         options.server_daemonized ?
           start_server(port, :daemon => true) :
           start_server(port, :daemon => false)
@@ -97,7 +97,7 @@ class Hubeye
         ['INT', 'KILL'].each do |sig|
           trap(sig) { STDOUT.puts; exit 1 }
         end
-        require File.join(LIBDIR, 'client', 'hubeye_client')
+        require File.join('hubeye', 'client', 'hubeye_client')
         start_client(host, port)
       end
     end
@@ -127,6 +127,5 @@ class Hubeye
 
   end
 end
-
 Hubeye.start
 
