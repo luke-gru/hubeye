@@ -488,42 +488,42 @@ EOS
         username, repo_name = @session.username, repo
         full_repo_name = "#{username}/#{repo_name}"
       end
-      unless options[:list]
-        hist = nil
-        begin
-          open "https://api.github.com/repos/#{username}/" \
-          "#{repo_name}/commits" do |f|
-            hist = JSON.parse f.read
-          end
-        rescue
-          @socket.puts "Not a Github repository name"
-          throw(:invalid_input)
+    unless options[:list]
+      hist = nil
+      begin
+        open "https://api.github.com/repos/#{username}/" \
+        "#{repo_name}/commits" do |f|
+          hist = JSON.parse f.read
         end
-        new_info =
-          {full_repo_name =>
-            {'sha' => hist.first['sha'],
-             'commit' =>
-               {'message' => hist.first['commit']['message'],
-                'committer' => {'name' => hist.first['commit']['committer']['name']}
-               }
-            }
+      rescue
+        @socket.puts "Not a Github repository name"
+        throw(:invalid_input)
+      end
+      new_info =
+        {full_repo_name =>
+          {'sha' => hist.first['sha'],
+            'commit' =>
+          {'message' => hist.first['commit']['message'],
+            'committer' => {'name' => hist.first['commit']['committer']['name']}
           }
-        commit = Commit.new(new_info)
-        # update the list
-        list.reject! {|cmt| cmt.repo == full_repo_name}
-        list << commit
-      end
-      if options[:full]
-        # unsupported so far
-        raise ArgumentError.new
-      elsif options[:latest]
-        commit.dup
-      elsif options[:list]
-        list.each {|c| return c if c.repo == full_repo_name}
-        nil
-      else
-        Commit.new full_repo_name => {'sha' => hist.first['sha']}
-      end
+          }
+      }
+      commit = Commit.new(new_info)
+      # update the list
+      list.reject! {|cmt| cmt.repo == full_repo_name}
+      list << commit
+    end
+    if options[:full]
+      # unsupported so far
+      raise ArgumentError.new
+    elsif options[:latest]
+      commit.dup
+    elsif options[:list]
+      list.each {|c| return c if c.repo == full_repo_name}
+      nil
+    else
+      Commit.new full_repo_name => {'sha' => hist.first['sha']}
+    end
     end
 
     private
@@ -618,7 +618,7 @@ EOS
                 end
               end
               Logger.log_change(full_repo_name, commit_msg, committer) unless
-                already_logged
+              already_logged
               # execute any hooks for that repository
               unless @session.hooks.empty?
                 if hooks = @session.hooks[full_repo_name]
@@ -673,15 +673,15 @@ EOS
       end
     end
 
-  end # of Server module
+    class Server
+      include ::Hubeye::Server
 
-  class HubeyeServer
-    include Server
-
-    def initialize(debug=true)
-      @debug = debug
+      def initialize(debug=true)
+        @debug = debug
+      end
     end
 
-  end
-end
+  end # of Server module
+
+end # end of Hubeye module
 

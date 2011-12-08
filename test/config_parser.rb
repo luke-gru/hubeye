@@ -1,9 +1,9 @@
-# Hubeye::Config::Parser.new uses StringIO.open() when option {:test => true} is set
+# Hubeye::Config::Parser.new uses StringIO.open() when option :test => true is set
 require 'stringio'
 
 class ConfigParserTests < Test::Unit::TestCase
 
-  # otherwise, Test::Unit busies the self.instance_variables
+  # otherwise, Test::Unit busies the object.instance_variables
   # array with things like @passed, and many others
   def instance_vars
     [:@username, :@default_track, :@hooks,

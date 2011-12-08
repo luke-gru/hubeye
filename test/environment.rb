@@ -1,5 +1,5 @@
 class EnvironmentTests < Test::Unit::TestCase
-  include Environment
+  include Hubeye::Environment
 
   def test_proper_rootdir
     assert_equal File.expand_path(File.dirname(__FILE__) + '/..'), ROOTDIR

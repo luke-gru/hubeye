@@ -89,7 +89,7 @@ module Hubeye
           puts "A service is already running on this port"
           exit 1
         end
-        require File.join('hubeye', 'server', 'hubeye_server')
+        require File.join('hubeye', 'server', 'server')
         options.server_daemonized ?
           start_server(port, :daemon => true) :
           start_server(port, :daemon => false)
@@ -97,7 +97,7 @@ module Hubeye
         ['INT', 'KILL'].each do |sig|
           trap(sig) { STDOUT.puts; exit 1 }
         end
-        require File.join('hubeye', 'client', 'hubeye_client')
+        require File.join('hubeye', 'client', 'client')
         start_client(host, port)
       end
     end
@@ -112,20 +112,21 @@ module Hubeye
       true
     end
 
-    def start_server(port, options={})
-      server = HubeyeServer.new(true) # debug: true
+    def start_server(port, options={}, *)
+      server = Server::Server.new(true) # debug
       if options[:daemon]
         Process.daemon(true) # don't change dir to '/'
       end
       server.start(port, options)
     end
 
-    def start_client(host, port)
-      client = HubeyeClient.new
+    def start_client(host, port, *)
+      client = Client::Client.new(false) # debug
       client.start(host, port)
     end
 
   end
 end
+
 Hubeye.start
 
