@@ -6,26 +6,21 @@ require_relative "connection"
 module Hubeye
   module Client
     class Client
-      attr_reader :sleep_time
+      attr_accessor :sleep_time
 
       begin
         Readline.emacs_editing_mode
       rescue NotImplementedError
         @@libedit = true
       ensure
-        LIST = %w{quit shutdown exit}.sort
+        LIST = %w{quit shutdown exit tracking hook add dir}
         comp_proc = Proc.new {|s| LIST.grep /#{Regexp.escape(s)}/}
         Readline.completion_proc = comp_proc rescue nil
       end
 
       def initialize(debug=false)
         @debug = debug
-        @sleep_time = 1
-      end
-
-      # do something with this to configure connection speed
-      def sleep_time=(s)
-        @sleep_time = s
+        @sleep_time = 0.5
       end
 
       def start(host, port)
@@ -60,7 +55,7 @@ module Hubeye
             if @input =~ /load repo/
               puts "Loading..."
             end
-            sleep @sleep_time
+            sleep sleep_time
             begin
               response = @s.readpartial(4096)
             rescue EOFError
@@ -81,7 +76,6 @@ module Hubeye
         end
       end
 
-    end # end of class Client
-  end # end module Client
-end # end of module Hubeye
-
+    end
+  end
+end
