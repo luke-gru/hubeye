@@ -1,12 +1,11 @@
 #!/usr/bin/env ruby
-require 'socket'
 require 'readline'
-require_relative "connection"
+require_relative 'connection'
 
 module Hubeye
   module Client
     class Client
-      attr_accessor :sleep_time
+      @@stty_save = `stty -g`
 
       begin
         Readline.emacs_editing_mode
@@ -14,13 +13,12 @@ module Hubeye
         @@libedit = true
       ensure
         LIST = %w{quit shutdown exit tracking hook add dir}
-        comp_proc = Proc.new {|s| LIST.grep /#{Regexp.escape(s)}/}
+        comp_proc = Proc.new {|s| LIST.grep /^#{Regexp.escape(s)}/}
         Readline.completion_proc = comp_proc rescue nil
       end
 
       def initialize(debug=false)
         @debug = debug
-        @sleep_time = 0.5
       end
 
       def start(host, port)
@@ -30,52 +28,56 @@ module Hubeye
         interact
       end
 
-      def get_input_readline(socket)
-        @input = Readline.readline('> ', true)
-        Readline::HISTORY.push(@input)
-      end
+      private
 
       # Now begin a loop of client/server interaction.
       def interact
-        while @s
-          loop do
-            get_input_readline(@s)
-            begin
-              if @input.match(/^\.$/) # '.' = pwd (of client process)
-                @s.puts @input.gsub(/\A\.\Z/, File.split(File.expand_path('.')).last)
-              else
-                @s.puts @input.gsub(/\//, 'diiv')
-              end
-            rescue
-              # Errno::EPIPE for broken pipes in Unix (server got an ^C or
-              # something like that)
-              exit 1
-            end
-            @s.flush
-            if @input =~ /load repo/
-              puts "Loading..."
-            end
-            sleep sleep_time
-            begin
-              response = @s.readpartial(4096)
-            rescue EOFError
-              response = "Bye!\n"
-            end
-            if response.chop.strip == "Bye!"
-              response[-1] == "\n" ? print(response) : puts(response)
-              @s.close
-              exit 0
-            elsif response.chop.strip.match(/shutting/i)
-              @s.close
-              exit 0
+        loop do
+          get_input_from_readline
+          begin
+            if @input.match(/^\.$/) # '.' = pwd (of client process)
+              @input.gsub!(/\A\.\Z/, File.split(File.expand_path('.')).last)
             else
-              response[-1] == "\n" ? print(response) : puts(response)
-              next
+              @input.gsub!(/\//, 'diiv')
             end
+            @s.deliver @input
+          rescue => e
+            # Errno::EPIPE for broken pipes in Unix (server got an ^C or
+            # something like that)
+            puts e.message
+            puts e.backtrace
+            exit 1
+          end
+          if @input =~ /load repo/
+            puts "Loading..."
+          end
+          begin
+            mesg = @s.read_all
+          rescue EOFError
+            mesg = "Bye!\n"
+          end
+          if mesg.chop.strip == "Bye!"
+            mesg[-1] == "\n" ? print(mesg) : puts(mesg)
+            @s.close
+            exit 0
+          elsif mesg.chop.strip.match(/shutting/i)
+            @s.close
+            exit 0
+          else
+            mesg[-1] == "\n" ? print(mesg) : puts(mesg)
+            next
           end
         end
       end
 
+      def get_input_from_readline
+        begin
+          @input = Readline.readline('> ', true)
+        rescue Interrupt => e
+          system('stty', @@stty_save)
+          exit
+        end
+      end
     end
   end
 end

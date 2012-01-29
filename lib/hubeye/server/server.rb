@@ -1,5 +1,7 @@
-require "hubeye/helpers/time"
+require "hubeye/shared/hubeye_protocol"
 require "hubeye/log/logger"
+require "hubeye/helpers/time"
+
 include Hubeye::Helpers::Time
 include Hubeye::Log
 
@@ -8,14 +10,11 @@ module Hubeye
     attr_accessor :remote_connection
     attr_reader :socket, :sockets, :session, :daemonized
 
-    # standard lib.
-    require 'socket'
     require 'yaml'
     require 'json'
     require 'open-uri'
     require 'forwardable'
 
-    # hubeye
     require_relative "commit"
     require_relative "session"
 
@@ -70,7 +69,7 @@ module Hubeye
       def call
         socket = server.socket
         session = server.session
-        socket.puts "Bye!"
+        socket.deliver "Bye!"
         # mark the session as continuous to not wipe the log file
         session.continuous = true
         Logger.log "Closing connection to #{socket.peeraddr[2]}"
@@ -91,7 +90,7 @@ module Hubeye
         Logger.log "Shutting down... (#{NOW})"
         Logger.log ""
         Logger.log ""
-        socket.puts("Shutting down server")
+        socket.deliver "Shutting down server"
         server.sockets.delete(socket)
         socket.close
         unless server.daemonized
@@ -113,9 +112,9 @@ module Hubeye
           File.open(file, "w") do |f_out|
             ::YAML.dump(hooks, f_out)
           end
-          socket.puts("Saved hook#{@matches[1]} as #{@matches[2]}")
+          socket.deliver "Saved hook#{@matches[1]} as #{@matches[2]}"
         else
-          socket.puts("No hook#{@matches[1]} to save")
+          socket.deliver "No hook#{@matches[1]} to save"
         end
       end
 
@@ -136,9 +135,9 @@ module Hubeye
           File.open(file, "w") do |f_out|
             ::YAML.dump(server.session.tracker.keys, f_out)
           end
-          socket.puts("Saved repo#{@matches[1]} as #{@matches[2]}")
+          socket.deliver "Saved repo#{@matches[1]} as #{@matches[2]}"
         else
-          socket.puts("No remote repos are being tracked")
+          socket.deliver "No remote repos are being tracked"
         end
       end
 
@@ -163,11 +162,11 @@ module Hubeye
           # repo
           server.session.hooks.merge!(new_hooks)
           unless @silent
-            socket.puts("Loaded #{@matches[1]} #{@matches[2]}")
+            socket.deliver "Loaded #{@matches[1]} #{@matches[2]}"
           end
         else
           unless @silent
-            socket.puts("No #{@matches[1]} file to load from")
+            socket.deliver "No #{@matches[1]} file to load from"
           end
         end
       end
@@ -185,7 +184,7 @@ module Hubeye
             new_repos = ::YAML.load(f)
           end
           if !new_repos
-            socket.puts "Unable to load #{@matches[2]}: empty file" unless @silent
+            socket.deliver "Unable to load #{@matches[2]}: empty file" unless @silent
             return
           end
           new_repos.each do |r|
@@ -194,10 +193,10 @@ module Hubeye
             server.session.tracker.add_or_replace!(commit.repo, commit.sha)
           end
           unless @silent
-            socket.puts "Loaded #{@matches[2]}.\nTracking:\n#{server.session.tracker.keys.join ', '}"
+            socket.deliver "Loaded #{@matches[2]}.\nTracking:\n#{server.session.tracker.keys.join ', '}"
           end
         else
-          socket.puts("No file to load from") unless @silent
+          socket.deliver "No file to load from"  unless @silent
         end
       end
     end
@@ -211,7 +210,7 @@ module Hubeye
         cmd   = @matches[4]
         hooks = server.session.hooks
         if repo.nil? and cmd.nil?
-          socket.puts("Format: 'hook add user/repo [dir: /my/dir/repo ] cmd: some_cmd'")
+          socket.deliver "Format: 'hook add user/repo [dir: /my/dir/repo ] cmd: some_cmd'"
           return
         end
         if hooks[repo]
@@ -225,7 +224,7 @@ module Hubeye
           dir = _dir || cwd
           hooks[repo] = {dir => [cmd]}
         end
-        socket.puts("Hook added")
+        socket.deliver "Hook added"
       end
     end
 
@@ -234,7 +233,7 @@ module Hubeye
         socket = server.socket
         hooks = server.session.hooks
         if hooks.empty?
-          socket.puts("No hooks")
+          socket.deliver "No hooks"
           return
         end
         pwd = File.expand_path('.')
@@ -257,7 +256,7 @@ dir:    #{local_dir}
 cmds:   #{command}\n
 EOS
         end
-        socket.puts(format_string)
+        socket.deliver format_string
       end
     end
 
@@ -284,13 +283,13 @@ EOS
           output << tracker.keys.join(', ')
         end
         output = "none" if output.empty?
-        socket.puts(output)
+        socket.deliver output
       end
     end
 
     class Next
       def call
-        server.socket.puts("")
+        server.socket.deliver ""
       end
     end
 
@@ -309,9 +308,9 @@ EOS
         full_repo_name = "#{username}/#{repo_name}"
         rm = session.tracker.delete(full_repo_name)
         if rm
-          socket.puts("Stopped watching repository #{full_repo_name}")
+          socket.deliver "Stopped watching repository #{full_repo_name}"
         else
-          socket.puts("Repository #{full_repo_name} not currently being watched")
+          socket.deliver "Repository #{full_repo_name} not currently being watched"
         end
       end
     end
@@ -340,17 +339,17 @@ EOS
         change = session.tracker.add_or_replace!(full_repo_name, new_sha)
         # new repo to track
         if !change
-          socket.puts("Repository #{full_repo_name} has not changed")
+          socket.deliver "Repository #{full_repo_name} has not changed"
           return
         elsif change[:add]
           # log the fact that the user added a repo to be tracked
           Logger.log("Added to tracker: #{full_repo_name} (#{NOW})")
           # show the user, via the client, the info and commit msg for the commit
-          socket.puts(msg)
+          socket.deliver msg
         elsif change[:replace]
           change_msg = "New commit on #{full_repo_name}\n"
           change_msg << msg
-          socket.puts(change_msg)
+          socket.deliver change_msg
           if server.daemonized
             Logger.log_change(full_repo_name, commit_msg, committer)
           else
@@ -378,15 +377,15 @@ EOS
 
         if !opts[:internal_input]
           begin
-            @input = socket.gets
-          rescue
+            @input = socket.read_all
+          rescue => e
+            STDOUT.puts e
             invalid_input.call
           end
           # check if the client pressed ^C or ^D
           if @input.nil?
             invalid_input.call
           end
-          @input.chop!
         else
           @input = opts[:internal_input]
         end
@@ -496,7 +495,7 @@ EOS
           hist = JSON.parse f.read
         end
       rescue
-        @socket.puts "Not a Github repository name"
+        @socket.deliver "Not a Github repository name"
         throw(:invalid_input)
       end
       new_info =
@@ -651,16 +650,16 @@ EOS
       readable.each do |socket|
         if socket == @server
           @socket = @server.accept
+          @socket.sync = false
           sockets << @socket
           # Inform the client of connection
           basic_inform = "Hubeye running on #{Socket.gethostname} as #{@session.username}"
           if !@session.tracker.empty?
-            @socket.puts "#{basic_inform}\nTracking: #{@session.tracker.keys.join ', '}"
+            @socket.deliver "#{basic_inform}\nTracking: #{@session.tracker.keys.join ', '}"
           else
-            @socket.puts basic_inform
+            @socket.deliver basic_inform
           end
           puts "Client connected at #{NOW}" unless @daemonized
-          @socket.flush
           if @session.continuous
             Logger.log "Accepted connection from #{@socket.peeraddr[2]} (#{NOW})"
           else
