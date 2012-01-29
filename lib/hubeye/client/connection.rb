@@ -22,6 +22,7 @@ module Hubeye
           puts mesg
         rescue SystemCallError, NoMethodError
           puts "The server's not running!"
+          exit 1
         rescue EOFError
           @retried ||= -1
           @retried += 1

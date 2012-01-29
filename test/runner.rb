@@ -1,10 +1,6 @@
 #!/usr/bin/env ruby
 
-# environment file
-require File.join(File.expand_path(File.dirname(__FILE__) + '/..'), "lib/hubeye/config/environment")
-
-# test/unit
-require 'test/unit'
+require_relative "test_helper"
 
 # test files
 require_relative 'environment'

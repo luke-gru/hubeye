@@ -5,7 +5,12 @@ require_relative 'connection'
 module Hubeye
   module Client
     class Client
-      @@stty_save = `stty -g`
+
+      def self.testing?
+        ENV["HUBEYE_ENV"] == 'test'
+      end
+
+      @@stty_save = `stty -g` unless testing?
 
       begin
         Readline.emacs_editing_mode
@@ -20,6 +25,7 @@ module Hubeye
       def initialize(debug=false)
         @debug = debug
       end
+
 
       def start(host, port)
         conn = Connection.new(host, port)
@@ -54,17 +60,17 @@ module Hubeye
           begin
             mesg = @s.read_all
           rescue EOFError
-            mesg = "Bye!\n"
+            mesg = "Bye!"
           end
-          if mesg.chop.strip == "Bye!"
-            mesg[-1] == "\n" ? print(mesg) : puts(mesg)
+          if mesg.strip == "Bye!"
+            puts(mesg)
             @s.close
             exit 0
-          elsif mesg.chop.strip.match(/shutting/i)
+          elsif mesg.strip.match(/shutting/i)
             @s.close
             exit 0
           else
-            mesg[-1] == "\n" ? print(mesg) : puts(mesg)
+            puts(mesg)
             next
           end
         end
@@ -74,7 +80,7 @@ module Hubeye
         begin
           @input = Readline.readline('> ', true)
         rescue Interrupt => e
-          system('stty', @@stty_save)
+          system('stty', @@stty_save) unless Client.testing?
           exit
         end
       end
