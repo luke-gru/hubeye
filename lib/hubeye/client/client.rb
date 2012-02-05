@@ -35,8 +35,6 @@ module Hubeye
       end
 
       private
-
-      # Now begin a loop of client/server interaction.
       def interact
         loop do
           get_input_from_readline
