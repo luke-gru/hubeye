@@ -1,6 +1,15 @@
 require "hubeye/shared/hubeye_protocol"
 require "hubeye/log/logger"
 require "hubeye/helpers/time"
+require "hubeye/config/parser"
+require "hubeye/notification/finder"
+require "hubeye/hooks/git_hooks"
+require "hubeye/hooks/executer"
+
+require File.expand_path("../tracker", __FILE__)
+require File.expand_path("../session", __FILE__)
+require 'yaml'
+require 'forwardable'
 
 include Hubeye::Helpers::Time
 include Hubeye::Log
@@ -9,19 +18,6 @@ module Hubeye
   module Server
     attr_accessor :remote_connection
     attr_reader :socket, :sockets, :tracker, :session, :daemonized
-
-    require 'yaml'
-    require 'json'
-    require 'open-uri'
-    require 'forwardable'
-
-    require_relative "commit"
-    require_relative "session"
-
-    require "hubeye/config/parser"
-    require "hubeye/notification/finder"
-    require "hubeye/hooks/git_hooks"
-    require "hubeye/hooks/executer"
 
     CONFIG_FILE = File.join(ENV['HOME'], ".hubeye", "hubeyerc")
     CONFIG = {}
@@ -70,7 +66,6 @@ module Hubeye
         socket.deliver "Bye!"
         # mark the session as continuous to not wipe the log file
         session.continuous = true
-        server.remote_connection = false
         Logger.log "Closing connection to #{socket.peeraddr[2]}"
         unless tracker.empty?
           Logger.log "Tracking: #{tracker.repo_names.join ', '}"
@@ -78,6 +73,7 @@ module Hubeye
         Logger.log ""
         sockets.delete(socket)
         socket.close
+        server.remote_connection = false
       end
     end
 
@@ -181,7 +177,7 @@ module Hubeye
             return
           end
           new_repos.each do |r|
-            tracker << r
+            tracker << server.full_repo_name(r)
           end
           unless @silent
             socket.deliver "Loaded #{@matches[2]}.\nTracking:\n#{tracker.repo_names}"
@@ -278,7 +274,6 @@ EOS
     class RmRepo
       def call
         username  = session.username
-        repo_name = session.repo_name
         m1 = @matches[1]
         if m1.include?('/')
           username, repo_name = m1.split('/')
@@ -298,21 +293,25 @@ EOS
     class AddRepo
       def call
         if @options and @options[:fullpath]
-          session.username, session.repo_name = input.split('/')
+          @username, @repo_name = input.split('/')
         else
-          session.repo_name = input
+          @repo_name = input
         end
         add_repo
       end
 
       private
       def add_repo
-        full_repo_name = "#{session.username}/#{session.repo_name}"
+        full_repo_name = "#{@username}/#{@repo_name}"
         change_state = tracker << full_repo_name
-        if change_state[:unchanged]
+        if change_state[:invalid]
+          socket.deliver "Repository #{full_repo_name} is not a valid Github repository"
+          throw(:invalid_input)
+        elsif change_state[:unchanged]
           socket.deliver "Repository #{full_repo_name} has not changed"
           return
         end
+
         commit = tracker.last
         msg = "#{commit.message}\n=> #{commit.committer_name}"
         if change_state[:added]
@@ -375,6 +374,7 @@ EOS
           extend Forwardable
           def_delegators :@strategy, :input
           def_delegators :@server, :tracker, :session, :sockets, :socket
+          attr_reader :server
           def initialize matches, strategy, options={}
             @matches  = matches
             @strategy = strategy
@@ -434,16 +434,21 @@ EOS
       listen(port)
       setup_env(options)
       loop do
-        waiting = catch(:connect) do
-          look_for_changes unless @remote_connection
+        unless @remote_connection
+          look_for_changes unless @tracker.empty?
+          client_connect(@sockets)
         end
-        client_connect(@sockets) if waiting
         catch(:invalid_input) do
           strategy = Strategy.new(self)
           strategy.call
         end
         @session.cleanup!
       end
+    end
+
+    def full_repo_name(repo)
+      return repo if repo.include? '/'
+      [@session.username, repo].join '/'
     end
 
     private
@@ -458,19 +463,20 @@ EOS
       trap_signals 'INT', 'KILL'
       @session = Session.new
       @session.username = CONFIG[:username]
-      @tracker = Tracker.new(self)
+      @tracker = Tracker.new
       unless CONFIG[:default_track].empty?
-        repos = CONFIG[:default_track]
+        repos = CONFIG[:default_track].dup
         repos.each do |repo|
-          @tracker << repo
+          repo_name = full_repo_name(repo)
+          @tracker << repo_name
         end
       end
       unless CONFIG[:load_hooks].empty?
-        hooks = CONFIG[:load_hooks]
+        hooks = CONFIG[:load_hooks].dup
         session_load :hooks => hooks
       end
       unless CONFIG[:load_repos].empty?
-        repos = CONFIG[:load_repos]
+        repos = CONFIG[:load_repos].dup
         session_load :repos => repos
       end
     end
@@ -504,21 +510,19 @@ EOS
 
     #TODO: refactor this ugly, long method into a new class
     def look_for_changes
-      if @sockets.size != 1 and @tracker.empty?
+      if @tracker.empty?
         @remote_connection = client_ready(@sockets, :block => true) ? true : false
-        throw(:connect, true) if @remote_connection
+        return if @remote_connection
       end
-      sleep_amt = CONFIG[:oncearound] / @tracker.length
-      loop do
+      until @remote_connection
+        sleep_amt = CONFIG[:oncearound] / @tracker.length
         @tracker.repo_names do |repo_name|
-          start_time = Time.now
+          puts repo_name
           change_state = @tracker << repo_name
-          api_time = (Time.now - start_time).to_i
           if change_state[:unchanged]
-            (sleep_amt - api_time).times do
-              sleep 1
+            (sleep_amt).times do
               @remote_connection = client_ready(@sockets) ? true : false
-              throw(:connect, true) if @remote_connection
+              return if @remote_connection
             end
           else
             # There was a change to a tracked repository.
@@ -541,7 +545,7 @@ EOS
               end
             end
             Logger.log_change(full_repo_name, commit_msg, committer) unless
-              already_logged
+            already_logged
             # execute any hooks for that repository
             unless @session.hooks.empty?
               if hooks = @session.hooks[full_repo_name]

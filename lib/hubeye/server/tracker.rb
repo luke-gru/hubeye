@@ -1,30 +1,31 @@
+require File.expand_path('../commit', __FILE__)
+require File.expand_path('../session', __FILE__)
 require 'forwardable'
 require 'json'
-require File.expand_path('../commit', __FILE__)
+require 'open-uri'
 
 module Hubeye
   module Server
     class Tracker
       extend Forwardable
-      def_delegators :@server, :socket, :session
       def_delegators :@commit_list, :[], :last, :first, :length, :each, :empty?
       attr_reader :commit_list
 
-      def initialize(server)
-        @server = server
+      def initialize
         @commit_list = []
       end
 
-      # Returns {:added     => true},
-      #         {:replaced  => true}, OR
-      #         {:unchanged => true}
+      # Returns {:added         => true},
+      #         {:replaced      => true},
+      #         {:unchanged     => true}, OR
+      #         {:invalid_input => true}
       # A commit won't be added if the repo is already tracked
       # and the newly searched for commit sha is the same as the
       # old one. Every call to #add requires a trip to a Github
       # server.
-      def add(repo)
-        repo_name = full_repo_name(repo)
+      def add(repo_name)
         raw_commit_ary = recent_repo_info(repo_name)
+        return {:invalid => true} unless raw_commit_ary
         commit = Commit.new(repo_name, raw_commit_ary)
         if tracked?(repo_name) && unchanged?(commit)
           return {:unchanged => true}
@@ -50,9 +51,10 @@ module Hubeye
         @commit_list.each {|cmt| return cmt if cmt.repo_name == full_repo_name(repo)}
         nil
       end
+      alias tracking? commit
 
       def repo_names
-        commit_list.map(&:repo_name)
+        @commit_list.map {|cmt| cmt.repo_name }
       end
 
       private
@@ -60,8 +62,7 @@ module Hubeye
         repo_names.include? full_repo_name
       end
 
-      # unchanged: after this new commit's sha is found to be in the
-      # commit_list
+      # unchanged: after this new commit's sha is found to be in the commit_list
       def unchanged?(new_commit_obj)
         @commit_list.each {|cmt| return true if cmt.sha == new_commit_obj.sha}
         false
@@ -76,20 +77,9 @@ module Hubeye
             info = JSON.parse f.read
           end
         rescue => e
-          unless Hubeye.test?
-            socket.deliver "Not a Github repository name"
-            throw(:invalid_input)
-          end
+          return
         end
         info
-      end
-
-      def full_repo_name(repo)
-        if repo.include? '/'
-          repo
-        else
-          "#{session.username}/#{repo}"
-        end
       end
 
     end

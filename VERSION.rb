@@ -1,5 +1,5 @@
 module Hubeye
-  # 0.3.0 since Dec. 4, 2011
-  VERSION = [0,3,2]
+  # 0.3.3 since 5 Feb. 2012
+  VERSION = [0,3,3]
 end
 

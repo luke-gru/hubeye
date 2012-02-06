@@ -30,4 +30,3 @@ module Hubeye
     end
   end
 end
-

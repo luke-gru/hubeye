@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
+require File.expand_path('../connection', __FILE__)
 require 'readline'
-require_relative 'connection'
 
 module Hubeye
   module Client

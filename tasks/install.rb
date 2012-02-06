@@ -25,4 +25,3 @@ end
 task :message do
   puts "Installing hubeye..."
 end
-
