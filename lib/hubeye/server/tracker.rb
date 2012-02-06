@@ -8,21 +8,22 @@ module Hubeye
   module Server
     class Tracker
       extend Forwardable
-      def_delegators :@commit_list, :[], :last, :first, :length, :each, :empty?
+      def_delegators :@commit_list, :[], :last, :first, :length, :each, :empty?, :clear
       attr_reader :commit_list
 
       def initialize
         @commit_list = []
       end
 
-      # Returns {:added         => true},
-      #         {:replaced      => true},
-      #         {:unchanged     => true}, OR
-      #         {:invalid_input => true}
+      # Returns {:added     => true},
+      #         {:replaced  => true},
+      #         {:unchanged => true}, OR
+      #         {:invalid   => true}
       # A commit won't be added if the repo is already tracked
       # and the newly searched for commit sha is the same as the
       # old one. Every call to #add requires a trip to a Github
       # server.
+      # NOTE: takes full repo_name only
       def add(repo_name)
         raw_commit_ary = recent_repo_info(repo_name)
         return {:invalid => true} unless raw_commit_ary
@@ -32,7 +33,7 @@ module Hubeye
         end
         ret = tracked?(repo_name) ? {:replaced => true} : {:added => true}
         # update the list
-        @commit_list.reject! {|cmt| cmt.repo_name == repo_name}
+        @commit_list.reject! {|cmt| cmt.repo_name == repo_name} if ret[:replaced]
         @commit_list << commit
         ret
       end
@@ -40,8 +41,8 @@ module Hubeye
       alias << add
 
       # Returns true if changed, false otherwise.
+      # NOTE: takes repo name only
       def delete(repo_name)
-        repo_name = full_repo_name(repo)
         old = @commit_list.dup
         @commit_list.delete_if {|cmt| cmt.repo_name == repo_name}
         old == @commit_list ? false : true

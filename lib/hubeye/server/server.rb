@@ -66,6 +66,7 @@ module Hubeye
         socket.deliver "Bye!"
         # mark the session as continuous to not wipe the log file
         session.continuous = true
+        server.remote_connection = false
         Logger.log "Closing connection to #{socket.peeraddr[2]}"
         unless tracker.empty?
           Logger.log "Tracking: #{tracker.repo_names.join ', '}"
@@ -73,7 +74,6 @@ module Hubeye
         Logger.log ""
         sockets.delete(socket)
         socket.close
-        server.remote_connection = false
       end
     end
 
@@ -180,7 +180,7 @@ module Hubeye
             tracker << server.full_repo_name(r)
           end
           unless @silent
-            socket.deliver "Loaded #{@matches[2]}.\nTracking:\n#{tracker.repo_names}"
+            socket.deliver "Loaded #{@matches[2]}.\nTracking:\n#{tracker.repo_names.join ', '}"
           end
         else
           socket.deliver "No file to load from"  unless @silent
@@ -273,6 +273,10 @@ EOS
 
     class RmRepo
       def call
+        if @options[:all]
+          rm_all
+          return
+        end
         username  = session.username
         m1 = @matches[1]
         if m1.include?('/')
@@ -288,14 +292,24 @@ EOS
           socket.deliver "Repository #{full_repo_name} not currently being watched"
         end
       end
+
+      def rm_all
+        if tracker.length.zero?
+          socket.deliver "Not watching any repositories"
+          return
+        end
+        repo_names = tracker.repo_names
+        tracker.clear
+        socket.deliver "Stopped watching repositories #{repo_names.join ', '}"
+      end
     end
 
     class AddRepo
       def call
         if @options and @options[:fullpath]
-          @username, @repo_name = input.split('/')
+          @username, @repo_name = input.split '/'
         else
-          @repo_name = input
+          @username, @repo_name = session.username, input
         end
         add_repo
       end
@@ -305,7 +319,7 @@ EOS
         full_repo_name = "#{@username}/#{@repo_name}"
         change_state = tracker << full_repo_name
         if change_state[:invalid]
-          socket.deliver "Repository #{full_repo_name} is not a valid Github repository"
+          socket.deliver "#{full_repo_name} isn't a valid Github repository"
           throw(:invalid_input)
         elsif change_state[:unchanged]
           socket.deliver "Repository #{full_repo_name} has not changed"
@@ -332,10 +346,9 @@ EOS
     end
 
     class Strategy
-      attr_reader :server, :input
-
-      UnknownStrategy = Class.new(StandardError)
       extend Forwardable
+      attr_reader :server, :input
+      UnknownStrategy = Class.new(StandardError)
       def_delegators :@server, :tracker, :session, :sockets, :socket
 
       def initialize(server, options={})
@@ -408,6 +421,7 @@ EOS
         %r{\Ahook add ([-\w]+/[-\w]+) (dir:\s?(.*))?\s*cmd:\s?(.*)\Z} => lambda {|m, s| AddHook.new(m, s)},
         %r{\Ahook list\Z} => lambda {|m, s| ListHooks.new(m, s)},
         %r{^\s*$} => lambda {|m, s| Next.new(m, s)},
+        %r{\Arm all\Z} => lambda {|m, s| RmRepo.new(m, s, :all => true)},
         %r{\Arm ([-\w]+/?[-\w]*)\Z} => lambda {|m, s| RmRepo.new(m, s)},
         lambda {|inp| inp.include? '/'} => lambda {|m, s| AddRepo.new(m, s, :fullpath => true)},
         lambda {|inp| not inp.nil?} => lambda {|m, s| AddRepo.new(m, s)}
@@ -435,7 +449,7 @@ EOS
       setup_env(options)
       loop do
         unless @remote_connection
-          look_for_changes unless @tracker.empty?
+          look_for_changes
           client_connect(@sockets)
         end
         catch(:invalid_input) do
@@ -465,18 +479,18 @@ EOS
       @session.username = CONFIG[:username]
       @tracker = Tracker.new
       unless CONFIG[:default_track].empty?
-        repos = CONFIG[:default_track].dup
+        repos = CONFIG[:default_track]
         repos.each do |repo|
           repo_name = full_repo_name(repo)
           @tracker << repo_name
         end
       end
       unless CONFIG[:load_hooks].empty?
-        hooks = CONFIG[:load_hooks].dup
+        hooks = CONFIG[:load_hooks]
         session_load :hooks => hooks
       end
       unless CONFIG[:load_repos].empty?
-        repos = CONFIG[:load_repos].dup
+        repos = CONFIG[:load_repos]
         session_load :repos => repos
       end
     end
@@ -485,7 +499,7 @@ EOS
       sigs.each do |sig|
         trap(sig) do
           @sockets.each {|s| s.close}
-          STDOUT.puts
+          STDOUT.print "\n"
           exit 1
         end
       end
@@ -510,18 +524,16 @@ EOS
 
     #TODO: refactor this ugly, long method into a new class
     def look_for_changes
-      if @tracker.empty?
-        @remote_connection = client_ready(@sockets, :block => true) ? true : false
-        return if @remote_connection
+      if @tracker.length.zero?
+        @remote_connection = client_ready(@sockets, :block => true)
       end
-      until @remote_connection
+      while !@remote_connection
         sleep_amt = CONFIG[:oncearound] / @tracker.length
-        @tracker.repo_names do |repo_name|
-          puts repo_name
+        @tracker.repo_names.each do |repo_name|
           change_state = @tracker << repo_name
           if change_state[:unchanged]
             (sleep_amt).times do
-              @remote_connection = client_ready(@sockets) ? true : false
+              @remote_connection = client_ready(@sockets)
               return if @remote_connection
             end
           else
@@ -561,10 +573,11 @@ EOS
 
     def client_ready(sockets, options={})
       if options[:block]
-        select(sockets, nil, nil)
+        r = select(sockets, nil, nil)
       else
-        select(sockets, nil, nil, 1)
+        r = select(sockets, nil, nil, 1)
       end
+      not r.nil?
     end
 
     def client_connect(sockets)
@@ -573,7 +586,7 @@ EOS
       readable.each do |socket|
         if socket == @tcp_server
           @socket = @tcp_server.accept
-          @socket.sync = false
+          @socket.sync = true
           sockets << @socket
           # Inform the client of connection
           basic_inform = "Hubeye running on #{Socket.gethostname} as #{@session.username}"
