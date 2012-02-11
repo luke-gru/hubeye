@@ -1,13 +1,10 @@
 #!/usr/bin/env ruby
 
+require File.join(File.expand_path(File.dirname(__FILE__) + "/../"), "lib/hubeye/config/environment")
 module Hubeye
-
-  # require environment and VERSION files
-  require File.join(File.expand_path(File.dirname(__FILE__) + "/../"), "lib/hubeye/config/environment")
   include Environment
   require File.join(ROOTDIR, 'VERSION')
 
-  # standard lib
   require 'optparse'
   require 'ostruct'
 
@@ -129,4 +126,3 @@ module Hubeye
 end
 
 Hubeye.start
-

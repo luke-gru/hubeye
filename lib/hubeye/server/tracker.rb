@@ -1,5 +1,4 @@
 require File.expand_path('../commit', __FILE__)
-require File.expand_path('../session', __FILE__)
 require 'forwardable'
 require 'json'
 require 'open-uri'
@@ -15,7 +14,7 @@ module Hubeye
         @commit_list = []
       end
 
-      # Returns {:added     => true},
+      # returns {:added     => true},
       #         {:replaced  => true},
       #         {:unchanged => true}, OR
       #         {:invalid   => true}
@@ -28,10 +27,10 @@ module Hubeye
         raw_commit_ary = recent_repo_info(repo_name)
         return {:invalid => true} unless raw_commit_ary
         commit = Commit.new(repo_name, raw_commit_ary)
-        if tracked?(repo_name) && unchanged?(commit)
+        if tracking?(repo_name) && unchanged?(commit)
           return {:unchanged => true}
         end
-        ret = tracked?(repo_name) ? {:replaced => true} : {:added => true}
+        ret = tracking?(repo_name) ? {:replaced => true} : {:added => true}
         # update the list
         @commit_list.reject! {|cmt| cmt.repo_name == repo_name} if ret[:replaced]
         @commit_list << commit
@@ -40,30 +39,30 @@ module Hubeye
 
       alias << add
 
-      # Returns true if changed, false otherwise.
-      # NOTE: takes repo name only
+      # returns true if deleted, false otherwise.
       def delete(repo_name)
-        old = @commit_list.dup
+        old_length = @commit_list.length
         @commit_list.delete_if {|cmt| cmt.repo_name == repo_name}
-        old == @commit_list ? false : true
+        new_length = @commit_list.length
+        old_length != new_length
       end
 
-      def commit(repo)
-        @commit_list.each {|cmt| return cmt if cmt.repo_name == full_repo_name(repo)}
+      # returns the most recently tracked commit object for that full repo
+      # name, or nil if it isn't tracked.
+      def commit(repo_name)
+        @commit_list.each {|cmt| return cmt if cmt.repo_name == repo_name}
         nil
       end
       alias tracking? commit
 
+      # returns a list of repo names being tracked
       def repo_names
         @commit_list.map {|cmt| cmt.repo_name }
       end
 
       private
-      def tracked?(full_repo_name)
-        repo_names.include? full_repo_name
-      end
-
-      # unchanged: after this new commit's sha is found to be in the commit_list
+      # a new_commit_obj is unchanged if it's sha is found to be in the
+      # commit_list
       def unchanged?(new_commit_obj)
         @commit_list.each {|cmt| return true if cmt.sha == new_commit_obj.sha}
         false
