@@ -3,8 +3,8 @@ require "hubeye/log/logger"
 require "hubeye/helpers/time"
 require "hubeye/config/parser"
 require "hubeye/notification/finder"
-require "hubeye/hooks/git_hooks"
-require "hubeye/hooks/executer"
+require "hubeye/hooks/command"
+require "hubeye/hooks/git"
 
 require File.expand_path("../strategies/decision", __FILE__)
 require File.expand_path("../tracker", __FILE__)
@@ -56,8 +56,7 @@ module Hubeye
     end
 
     if CONFIG[:notification_wanted]
-      CONFIG[:desktop_notification] =
-        Notification::Finder.find_notify
+      CONFIG[:desktop_notification] = Notification::Finder.find_notify
     end
 
     # main server loop

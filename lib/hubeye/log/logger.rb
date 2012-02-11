@@ -27,6 +27,7 @@ Repository: #{repo_name.downcase.strip} has changed (#{Time.now.strftime("%m/%d/
 Commit msg: #{commit_msg}
 Committer : #{committer}
 ===============================
+
 MSG
         if opts[:include_terminal]
           STDOUT.puts change_msg

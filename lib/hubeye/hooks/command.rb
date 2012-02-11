@@ -21,7 +21,7 @@ module Hubeye
             end
           end
         rescue ArgumentError
-          raise NoHookError "There aren't any hook commands for the repository #{repo}"
+          raise NoHookError.new "There aren't any hook commands for the repository #{repo}"
         end
       end
 

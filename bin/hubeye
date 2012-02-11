@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require File.join(File.expand_path(File.dirname(__FILE__) + "/../"), "lib/hubeye/config/environment")
+
 module Hubeye
   include Environment
   require File.join(ROOTDIR, 'VERSION')
@@ -80,19 +81,17 @@ module Hubeye
       options = Options.parse(ARGV)
       host = options.host
       port = options.port
-      daemonized = options.server_daemonized
       if options.server_wanted
         unless port_open?(port)
           puts "A service is already running on this port"
           exit 1
         end
         require File.join('hubeye', 'server', 'server')
-        options.server_daemonized ?
-          start_server(port, :daemon => true) :
-          start_server(port, :daemon => false)
+        start_server(port, :daemon => options.server_daemonized)
       else
+        # move this to client script
         ['INT', 'KILL'].each do |sig|
-          trap(sig) { STDOUT.puts; exit 1 }
+          trap(sig) { STDOUT.print("\n"); exit 1 }
         end
         require File.join('hubeye', 'client', 'client')
         start_client(host, port)
@@ -109,7 +108,7 @@ module Hubeye
       true
     end
 
-    def start_server(port, options={}, *)
+    def start_server(port, options={})
       server = Server::Server.new(true) # debug
       if options[:daemon]
         Process.daemon(true) # don't change dir to '/'
@@ -117,7 +116,7 @@ module Hubeye
       server.start(port, options)
     end
 
-    def start_client(host, port, *)
+    def start_client(host, port)
       client = Client::Client.new(false) # debug
       client.start(host, port)
     end
