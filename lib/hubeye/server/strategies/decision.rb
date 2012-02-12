@@ -11,26 +11,28 @@ module Hubeye
         # ===============
         # keys: input matches
         # OR
-        # lambda {|input| input.something?} => SomeStrategy.new(basestrategy)
+        # lambda {|input| input.something?} => SomeStrategy.new(decision)
         #
-        # values: lambda {|basestrategy, matches| SomeStrategy.new(basestrategy, matches)}
+        # values: lambda {|decision, matches|  SomeStrategy.new(decision, matches)}
         STRATEGIES = {
-          %r{\Ashutdown\Z} => lambda {|s, m| Shutdown.new(s, m)},
-          %r{\Aquit|exit\Z} => lambda {|s, m| Exit.new(s, m)},
-          %r{\Atracking\s*\Z} => lambda {|s, m| ListTracking.new(s, m)},
-          %r{\Atracking\s*-d\Z} => lambda {|s, m| ListTracking.new(s, m, :details => true)},
-          %r{\A\s*save hook(s?) as (.+)\Z} => lambda {|s, m| SaveHook.new(s, m)},
-          %r{\A\s*save repo(s?) as (.+)\Z} => lambda {|s, m| SaveRepo.new(s, m)},
-          %r{\A\s*load hook(s?) (.+)\Z} => lambda {|s, m| LoadHook.new(s, m)},
-          %r{\A\s*load repo(s?) (.+)\Z} => lambda {|s, m| LoadRepo.new(s, m)},
-          %r{\A\s*internal load hook(s?) (.+)\Z} => lambda {|s, m| LoadHook.new(s, m, :internal => true)},
-          %r{\A\s*internal load repo(s?) (.+)\Z} => lambda {|s, m| LoadRepo.new(s, m, :internal => true)},
-          %r{\Ahook add ([-\w]+/[-\w]+) (dir:\s?(.*))?\s*cmd:\s?(.*)\Z} => lambda {|s, m| AddHook.new(s, m)},
-          %r{\Ahook list\Z} => lambda {|s, m| ListHooks.new(s, m)},
-          %r{^\s*$} => lambda {|s, m| Next.new(s, m)},
-          %r{\Arm all\Z} => lambda {|s, m| RmRepo.new(s, m, :all => true)},
-          %r{\Arm ([-\w]+/?[-\w]*)\Z} => lambda {|s, m| RmRepo.new(s, m)},
-          lambda {|inp| not inp.nil?} => lambda {|s| AddRepo.new(s)}
+          %r{\Ashutdown\Z} => lambda {|d, m| Shutdown.new(d, m)},
+          %r{\Aquit|exit\Z} => lambda {|d, m| Exit.new(d, m)},
+          %r{\Atracking\s*\Z} => lambda {|d, m| ListTracking.new(d, m)},
+          %r{\Atracking\s*-d\Z} => lambda {|d, m| ListTracking.new(d, m, :details => true)},
+          %r{\Aadd (.*)} => lambda {|d, m| AddRepo.new(d, m)},
+          %r{\A\s*save hook(s?) as (.+)\Z} => lambda {|d, m| SaveHook.new(d, m)},
+          %r{\A\s*save repo(s?) as (.+)\Z} => lambda {|d, m| SaveRepo.new(d, m)},
+          %r{\A\s*load hook(s?) (.+)\Z} => lambda {|d, m| LoadHook.new(d, m)},
+          %r{\A\s*load repo(s?) (.+)\Z} => lambda {|d, m| LoadRepo.new(d, m)},
+          %r{\A\s*internal load hook(s?) (.+)\Z} => lambda {|d, m| LoadHook.new(d, m, :internal => true)},
+          %r{\A\s*internal load repo(s?) (.+)\Z} => lambda {|d, m| LoadRepo.new(d, m, :internal => true)},
+          %r{\Ahook add ([-\w]+/[-\w]+) (dir:\s?(.*))?\s*cmd:\s?(.*)\Z} => lambda {|d, m| AddHook.new(d, m)},
+          %r{\Ahook list\Z} => lambda {|d, m| ListHooks.new(d, m)},
+          %r{^\s*$} => lambda {|d, m| Next.new(d, m)},
+          %r{\Arm all\Z} => lambda {|d, m| RmRepo.new(d, m, :all => true)},
+          %r{\Arm ([-\w]+/?[-\w]*)\Z} => lambda {|d, m| RmRepo.new(d, m)},
+          # fell through
+          lambda {|input| not input.nil?} => lambda {|d| InvalidCommand.new(d)}
         }
 
       class Decision
@@ -66,7 +68,7 @@ module Hubeye
           @input.gsub! /diiv/, '/'
         end
 
-        # Get all the strategy classes from the files names in the /server/strategies
+        # Get all the strategy classes from the files names in the /server/strategies/
         # directory
 
         @@strategy_classes = []
@@ -98,7 +100,7 @@ module Hubeye
           end
         end
 
-        def call
+        def call_strategy
           STRATEGIES.each do |inp,strat|
             if inp.respond_to? :match
               if m = @input.match(inp)

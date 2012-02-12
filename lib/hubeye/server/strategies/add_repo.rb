@@ -13,7 +13,7 @@ module Hubeye
 
         # Add the given space-separated Github repo(s) if they're valid
         def call
-          repo_names_given = input.split
+          repo_names_given = @matches[1].split
           @multiple_repos_given = repo_names_given.size > 1
           @unique_repo_names = Set.new
           # hash of states associated with repository names.
@@ -24,7 +24,7 @@ module Hubeye
             @unique_repo_names << full_name
           end
           add_repos
-          @output = ''; gather_output
+          gather_output
           socket.deliver @output
         end
 
@@ -32,12 +32,14 @@ module Hubeye
 
         def add_repos
           @unique_repo_names.each do |full_name|
-            change_state = (tracker << full_name).keys.first
+            change_state_hash = (tracker << full_name)
+            change_state = change_state_hash.keys.first
             @states_with_repos[change_state] << full_name
           end
         end
 
         def gather_output
+          @output = ''
           STATES.each do |state|
             @states_with_repos[state].each do |full_name|
               @output << header(full_name) if @multiple_repos_given
@@ -49,8 +51,10 @@ module Hubeye
                 cmt = tracker.commit(full_name)
                 @output << REPLACED % full_name
                 log_change(full_name, cmt)
-              else
-                @output << self.class.const_get(state.to_s.upcase) % full_name
+              when :unchanged
+                @output << UNCHANGED % full_name
+              when :invalid
+                @output << INVALID % full_name
               end
               @output << "\n" if @multiple_repos_given && full_name != last_repo_outputted
             end

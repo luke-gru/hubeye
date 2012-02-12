@@ -69,8 +69,8 @@ module Hubeye
           client_connect(@sockets)
         end
         catch(:invalid_input) do
-          strategy = Strategies::Decision.new(self)
-          strategy.call
+          decision = Strategies::Decision.new(self)
+          decision.call_strategy
         end
         @session.cleanup!
       end
@@ -138,12 +138,11 @@ module Hubeye
       end
     end
 
-    #TODO: refactor this ugly, long method into a new class
     def look_for_changes
       if @tracker.length.zero?
         @remote_connection = client_ready(@sockets, :block => true)
       end
-      while !@remote_connection
+      while not @remote_connection
         sleep_amt = CONFIG[:oncearound] / @tracker.length
         @tracker.repo_names.each do |repo_name|
           change_state = @tracker << repo_name
@@ -173,7 +172,7 @@ module Hubeye
               end
             end
             Logger.log_change(full_repo_name, commit_msg, committer) unless
-            already_logged
+              already_logged
             # execute any hooks for that repository
             unless @session.hooks.empty?
               if hooks = @session.hooks[full_repo_name]
