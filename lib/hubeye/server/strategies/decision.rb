@@ -29,10 +29,10 @@ module Hubeye
           %r{\Ahook add ([-\w]+/[-\w]+) (dir:\s?(.*))?\s*cmd:\s?(.*)\Z} => lambda {|d, m| AddHook.new(d, m)},
           %r{\Ahook list\Z} => lambda {|d, m| ListHooks.new(d, m)},
           %r{^\s*$} => lambda {|d, m| Next.new(d, m)},
-          %r{\Arm all\Z} => lambda {|d, m| RmRepo.new(d, m, :all => true)},
+          %r{\Arm\s*-a\Z} => lambda {|d, m| RmRepo.new(d, m, :all => true)},
           %r{\Arm ([-\w]+/?[-\w]*)\Z} => lambda {|d, m| RmRepo.new(d, m)},
-          # fell through
-          lambda {|input| not input.nil?} => lambda {|d| InvalidCommand.new(d)}
+          # if all else fails, try to add the input as a repo
+          %r{\A(.*)} => lambda {|d, m| AddRepo.new(d, m)},
         }
 
       class Decision

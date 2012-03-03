@@ -125,13 +125,13 @@ module Hubeye
       opts = {:hooks => nil, :repos => nil}.merge options
       if hooks = opts[:hooks]
         hooks.each do |h|
-          strat = Strategies::Decision.new(self, :internal_input => "internal load hook #{h}")
-          strat.call
+          decision = Strategies::Decision.new(self, :internal_input => "internal load hook #{h}")
+          decision.call_strategy
         end
       elsif repos = opts[:repos]
         repos.each do |r|
-          strat = Strategies::Decision.new(self, :internal_input => "internal load repo #{r}")
-          strat.call
+          decision = Strategies::Decision.new(self, :internal_input => "internal load repo #{r}")
+          decision.call_strategy
         end
       else
         raise ArgumentError.new "Must load either hooks or repos"
@@ -146,7 +146,7 @@ module Hubeye
         sleep_amt = CONFIG[:oncearound] / @tracker.length
         @tracker.repo_names.each do |repo_name|
           change_state = @tracker << repo_name
-          if change_state[:unchanged]
+          if change_state  == :unchanged
             (sleep_amt).times do
               @remote_connection = client_ready(@sockets)
               return if @remote_connection

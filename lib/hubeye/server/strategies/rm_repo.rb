@@ -19,7 +19,7 @@ module Hubeye
         end
 
         def rm_all
-          if tracker.length.zero?
+          if tracker.empty?
             socket.deliver "Not watching any repositories"
             return
           end

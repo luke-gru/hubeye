@@ -14,10 +14,12 @@ module Hubeye
         @commit_list = []
       end
 
-      # returns {:added     => true},
-      #         {:replaced  => true},
-      #         {:unchanged => true}, OR
-      #         {:invalid   => true}
+      # returns one of:
+      #                  :added
+      #                  :replaced
+      #                  :unchanged
+      #                  :invalid
+      #
       # A commit won't be added if the repo is already tracked
       # and the newly searched for commit sha is the same as the
       # old one. Every call to #add requires a trip to a Github
@@ -25,16 +27,16 @@ module Hubeye
       # NOTE: takes full repo_name only
       def add(repo_name)
         raw_commit_ary = recent_repo_info(repo_name)
-        return {:invalid => true} unless raw_commit_ary
+        return :invalid unless raw_commit_ary
         commit = Commit.new(repo_name, raw_commit_ary)
         if tracking?(repo_name) && unchanged?(commit)
-          return {:unchanged => true}
+          return :unchanged
         end
-        ret = tracking?(repo_name) ? {:replaced => true} : {:added => true}
+        state = tracking?(repo_name) ? :replaced : :added
         # update the list
-        @commit_list.reject! {|cmt| cmt.repo_name == repo_name} if ret[:replaced]
+        @commit_list.reject! {|cmt| cmt.repo_name == repo_name} if state == :replaced
         @commit_list << commit
-        ret
+        state
       end
 
       alias << add

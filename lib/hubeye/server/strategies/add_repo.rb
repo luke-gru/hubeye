@@ -32,8 +32,7 @@ module Hubeye
 
         def add_repos
           @unique_repo_names.each do |full_name|
-            change_state_hash = (tracker << full_name)
-            change_state = change_state_hash.keys.first
+            change_state = tracker << full_name
             @states_with_repos[change_state] << full_name
           end
         end
