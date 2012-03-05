@@ -73,8 +73,8 @@ You can add another user's repo like this:
 or
     > add rails/rails
 
-If you want to add multiple repos at once, separated by spaces, use the<br />
-<i>'add repo1 repo2'</i> syntax
+If you want to add multiple repos at once, use the<br />
+<i>'add repo1 other_user/repo2 repo3 '</i> syntax
 
 Hubeye doesn't actually enter its tracking loop unless you disconnect<br />
 from the server and leave the server running. This can be done by:
@@ -127,7 +127,7 @@ The autotest gem is needed for Desktop notification to work with growl.<br />
 Desktop notification is currently untested with growl, so please send error reports if<br />
 you have any problems, or fork Hubeye and help out!</i>
 
-###Shutting down and persistence between sessions
+###Shutting Down and Persistence between Sessions
 
     > shutdown
 
@@ -151,7 +151,7 @@ And then load them any time (even after a shutdown, next session, next week, etc
 This puts the repository names in the watch list with their most recent commits,
 not the commits that were being tracked when you saved the repos.
 
-###Working with hooks
+###Working with Hooks
 
     > hook add rails/rails dir: /path/to/local/rails cmd: git pull origin master
 
@@ -184,7 +184,7 @@ Then, next weekend:
 These hooks, of course, will only really do anything if the repositories they <br />
 are hooked to are currently being watched. This is not done automatically.
 
-###All ~/.hubeye/hubeyerc configurations
+###All ~/.hubeye/hubeyerc Configurations
 
 When the server is started, the options are set here.
 

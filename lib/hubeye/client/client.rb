@@ -39,7 +39,7 @@ module Hubeye
         loop do
           get_input_from_readline
           begin
-            if @input.match(/^add \.$/) # '.' = pwd (of client process)
+            if @input.match(/^(add)?\s*\.$/) # '.' = pwd (of client process)
               @input.gsub!(/\./, File.split(File.expand_path('.')).last)
             else
               @input.gsub!(/\//, 'diiv')
