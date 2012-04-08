@@ -11,3 +11,11 @@ module Autotest
   end
 end
 
+module Notifiable
+  class GrowlNotification
+
+    def initialize(*args)
+      ::Autotest::Growl.growl *args
+    end
+  end
+end

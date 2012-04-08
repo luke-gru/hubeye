@@ -137,4 +137,3 @@ class ConfigParserTests < Test::Unit::TestCase
   end
 
 end
-

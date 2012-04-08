@@ -1,11 +1,10 @@
 #!/usr/bin/env ruby
 
-require_relative "test_helper"
+require File.expand_path('../test_helper', __FILE__)
 
 # test files
-require_relative 'environment'
-require File.join(File.expand_path(File.dirname(__FILE__) + '/..'), "lib/hubeye/notification/finder")
-require_relative "notification"
-require Hubeye::Environment::LIBDIR + '/hubeye/config/parser'
-require_relative "config_parser"
-
+require File.expand_path('../environment', __FILE__)
+require File.join(File.expand_path(File.dirname(__FILE__) + '/..'), "lib/hubeye/notifiable/notification")
+require File.expand_path('../notification', __FILE__)
+require File.join(Hubeye::Environment::LIBDIR, '/hubeye/config/parser')
+require File.expand_path('../config_parser', __FILE__)

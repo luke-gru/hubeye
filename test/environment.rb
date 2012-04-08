@@ -14,4 +14,3 @@ class EnvironmentTests < Test::Unit::TestCase
   end
 
 end
-

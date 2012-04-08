@@ -48,8 +48,7 @@ module Hubeye
           rescue => e
             # Errno::EPIPE for broken pipes in Unix (server got an ^C or
             # something like that)
-            puts e.message
-            puts e.backtrace
+            puts e.message; puts e.backtrace
             exit 1
           end
           if @input =~ /load repo/

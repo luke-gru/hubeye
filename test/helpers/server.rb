@@ -25,12 +25,12 @@ module Test
         else
           @socket.deliver basic_inform
         end
-        puts "Client connected at #{NOW}" unless @daemonized
+        puts "Client connected at #{NOW[]}" unless @daemonized
         if @session.continuous
-          Logger.log "Accepted connection from STDIN (#{NOW})"
+          Logger.log "Accepted connection from STDIN (#{NOW[]})"
         else
           # wipe the log file and start fresh
-          Logger.relog "Accepted connection from STDIN (#{NOW})"
+          Logger.relog "Accepted connection from STDIN (#{NOW[]})"
         end
       end
 

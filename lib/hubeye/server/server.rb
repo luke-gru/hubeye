@@ -2,7 +2,7 @@ require "hubeye/shared/hubeye_protocol"
 require "hubeye/log/logger"
 require "hubeye/helpers/time"
 require "hubeye/config/parser"
-require "hubeye/notification/finder"
+require "hubeye/notifiable/notification"
 require "hubeye/hooks/command"
 require "hubeye/hooks/git"
 
@@ -56,7 +56,7 @@ module Hubeye
     end
 
     if CONFIG[:notification_wanted]
-      CONFIG[:desktop_notification] = Notification::Finder.find_notify
+      CONFIG[:desktop_notification] = Notifiable::Notification.type
     end
 
     # main server loop
@@ -161,10 +161,10 @@ module Hubeye
             change_msg = "Repo #{full_repo_name} has changed\nNew commit: " \
               "#{commit_msg}\n=> #{committer}"
             case CONFIG[:desktop_notification]
-            when "libnotify"
-              Notification::GnomeNotify.notify("Hubeye", change_msg)
-            when "growl"
-              Autotest::Growl.growl("Hubeye", change_msg)
+            when :libnotify
+              Notifiable::GnomeNotification.new("Hubeye", change_msg)
+            when :growl
+              Notifiable::GrowlNotification.new("Hubeye", change_msg)
             when nil
               unless @daemonized
                 Logger.log_change(full_repo_name, commit_msg, committer, :include_terminal => true)
@@ -210,7 +210,7 @@ module Hubeye
           else
             @socket.deliver basic_inform
           end
-          puts "Client connected at #{NOW}" unless @daemonized
+          puts "Client connected at #{NOW[]}" unless @daemonized
           if @session.continuous
             Logger.log "Accepted connection from #{@socket.peeraddr[2]} (#{NOW})"
           else

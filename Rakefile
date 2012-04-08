@@ -12,7 +12,6 @@ end
 
 desc 'Display current version'
 task :version do
-  require_relative 'VERSION'
+  require File.expand_path('../version', __FILE__)
   puts Hubeye::VERSION * '.'
 end
-

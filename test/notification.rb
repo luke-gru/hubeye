@@ -1,15 +1,15 @@
 class NotifyTests < Test::Unit::TestCase
-  include Hubeye::Notification
+  include Hubeye::Notifiable
 
-  def test_libnotify_on_linux
-    if RUBY_PLATFORM =~ /linux/i
-      assert_equal "libnotify", Finder.find_notify
+  if RUBY_PLATFORM =~ /linux/i
+    def test_libnotify_on_linux
+      assert_equal :libnotify, Notification.type
     end
   end
 
-  def test_growl_returns_on_darwin
-    if RUBY_PLATFORM =~ /darwin/i
-      assert_equal "growl", Finder.find_notify
+  if RUBY_PLATFORM =~ /darwin/i
+    def test_growl_returns_on_darwin
+      assert_equal :growl, Notification.type
     end
   end
 

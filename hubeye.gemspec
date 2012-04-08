@@ -30,4 +30,3 @@ Gem::Specification.new do |s|
   s.license = 'MIT'
   s.required_ruby_version = '>= 1.8.7'
 end
-

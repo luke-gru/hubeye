@@ -5,7 +5,7 @@ module Hubeye
       class Shutdown
         def call
           Logger.log "Closing connection to #{socket.peeraddr[2]}"
-          Logger.log "Shutting down... (#{NOW})"
+          Logger.log "Shutting down... (#{NOW[]})"
           Logger.log ""
           Logger.log ""
           socket.deliver "Shutting down server"

@@ -213,4 +213,3 @@ client, see the <i>Shutting down and persistence between sessions</i> section.
 <i>desktop notification</i>: whether to notify of repo changes using libnotify <br />
 or growl. This is set to <i>on</i> by default. However, if no notification<br />
 system is found, it is ignored.
-

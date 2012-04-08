@@ -1,3 +1,5 @@
+require File.expand_path('../../helpers/time', __FILE__)
+
 module Hubeye
   module Log
     class Logger
@@ -23,14 +25,14 @@ module Hubeye
         opts = {:include_terminal => false}.merge options
         change_msg = <<MSG
 ===============================
-Repository: #{repo_name.downcase.strip} has changed (#{Time.now.strftime("%m/%d/%Y at %I:%M%p")})
+Repository: #{repo_name.downcase.strip} has changed (#{NOW[]})
 Commit msg: #{commit_msg}
 Committer : #{committer}
 ===============================
 
 MSG
         if opts[:include_terminal]
-          STDOUT.puts change_msg
+          $sdtout.puts change_msg
         end
         log(change_msg)
       end
